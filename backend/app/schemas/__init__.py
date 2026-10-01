@@ -6,6 +6,17 @@ Architecture Rule:
 """
 
 from app.schemas.health import HealthResponse
-from app.schemas.weather_schema import WeatherResponse, WeatherErrorResponse
+from app.schemas.weather_schema import (
+    ForecastDay,
+    ForecastResponse,
+    WeatherErrorResponse,
+    WeatherResponse,
+)
 
-__all__ = ["HealthResponse", "WeatherResponse", "WeatherErrorResponse"]
+__all__ = [
+    "HealthResponse",
+    "WeatherResponse",
+    "ForecastDay",
+    "ForecastResponse",
+    "WeatherErrorResponse",
+]

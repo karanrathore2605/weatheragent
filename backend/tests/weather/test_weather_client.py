@@ -173,3 +173,65 @@ def test_get_current_conditions_server_error(mock_get: MagicMock, client_with_ke
 
     with pytest.raises(WeatherServiceUnavailableError, match="temporarily unavailable"):
         client_with_key.get_current_conditions(22.7196, 75.8577)
+
+
+@patch("httpx.Client.get")
+def test_get_forecast_success(mock_get: MagicMock, client_with_key: GoogleWeatherClient) -> None:
+    """Test successful forecast retrieval."""
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "forecastDays": [
+            {
+                "interval": {"startTime": "2026-10-02T00:00:00Z"},
+                "daytimeForecast": {
+                    "temperature": {"min": 24.5, "max": 32.1},
+                    "weatherCondition": {"description": {"text": "Sunny"}},
+                    "precipitation": {"probability": 0.20},
+                    "humidity": {"relative": 60},
+                    "wind": {"speed": {"value": 12.4}},
+                },
+            }
+        ]
+    }
+    mock_get.return_value = mock_response
+
+    result = client_with_key.get_forecast(22.7196, 75.8577, days=5)
+    assert "forecastDays" in result
+    assert len(result["forecastDays"]) == 1
+
+
+@patch("httpx.Client.get")
+def test_get_forecast_timeout(mock_get: MagicMock, client_with_key: GoogleWeatherClient) -> None:
+    """Test timeout during forecast retrieval raises WeatherTimeoutError."""
+    mock_get.side_effect = httpx.TimeoutException("Timeout")
+    with pytest.raises(WeatherTimeoutError, match="timed out"):
+        client_with_key.get_forecast(22.7196, 75.8577, days=5)
+
+
+@patch("httpx.Client.get")
+def test_get_forecast_auth_failure(mock_get: MagicMock, client_with_key: GoogleWeatherClient) -> None:
+    """Test HTTP 401 during forecast raises WeatherAuthenticationError."""
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_get.return_value = mock_response
+    with pytest.raises(WeatherAuthenticationError):
+        client_with_key.get_forecast(22.7196, 75.8577, days=5)
+
+
+@patch("httpx.Client.get")
+def test_get_forecast_server_error(mock_get: MagicMock, client_with_key: GoogleWeatherClient) -> None:
+    """Test HTTP 500 during forecast raises WeatherServiceUnavailableError."""
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_get.return_value = mock_response
+    with pytest.raises(WeatherServiceUnavailableError):
+        client_with_key.get_forecast(22.7196, 75.8577, days=5)
+
+
+def test_get_forecast_missing_key() -> None:
+    """Test get_forecast with empty key raises WeatherAuthenticationError."""
+    client = GoogleWeatherClient(api_key="")
+    with pytest.raises(WeatherAuthenticationError):
+        client.get_forecast(22.7196, 75.8577, days=5)
+

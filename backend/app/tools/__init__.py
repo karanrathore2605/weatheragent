@@ -5,6 +5,6 @@ Architecture Rule:
 - Agent -> Tool -> Service.
 """
 
-from app.tools.weather_tools import get_current_weather
+from app.tools.weather_tools import get_current_weather, get_weather_forecast
 
-__all__ = ["get_current_weather"]
+__all__ = ["get_current_weather", "get_weather_forecast"]

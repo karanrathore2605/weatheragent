@@ -1,33 +1,87 @@
-import React from "react";
-import { Header, HealthStatus, ArchitectureCard } from "../components";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  WeatherHeader,
+  CitySearch,
+  LoadingState,
+  ErrorMessage,
+  CurrentWeatherCard,
+  ForecastGrid,
+} from "../components";
+import { getCurrentWeather, getWeatherForecast } from "../services/api";
+
+const DEFAULT_CITY = "Indore";
 
 export function Dashboard() {
-  return (
-    <div className="app-shell">
-      <Header />
-      <main className="main-content">
-        <div className="content-container">
-          <div className="welcome-banner">
-            <div className="banner-badge">Branch 01 • Production Foundation</div>
-            <h2 className="banner-title">Welcome to Weather Agent Foundation</h2>
-            <p className="banner-text">
-              The project is cleanly decoupled between FastAPI backend and React frontend.
-              Upcoming branches will integrate Google Weather API, LangGraph agent workflows,
-              calculators, conversation memory, and Gmail tools.
-            </p>
-          </div>
+  const [activeCity, setActiveCity] = useState(DEFAULT_CITY);
+  const [currentWeather, setCurrentWeather] = useState(null);
+  const [forecastData, setForecastData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-          <div className="dashboard-grid">
-            <HealthStatus />
-            <ArchitectureCard />
-          </div>
+  const fetchWeatherData = useCallback(async (city) => {
+    if (!city || !city.trim()) {
+      setError("Please enter a city.");
+      return;
+    }
+
+    const trimmed = city.trim();
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Concurrently query current conditions and 5-day forecast
+      const [currentRes, forecastRes] = await Promise.all([
+        getCurrentWeather(trimmed),
+        getWeatherForecast(trimmed, 5),
+      ]);
+
+      setCurrentWeather(currentRes);
+      setForecastData(forecastRes);
+      setActiveCity(trimmed);
+    } catch (err) {
+      setError(err.message || "Unable to get weather information right now. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWeatherData(DEFAULT_CITY);
+  }, [fetchWeatherData]);
+
+  const handleSearch = (city) => {
+    fetchWeatherData(city);
+  };
+
+  const handleRetry = () => {
+    fetchWeatherData(activeCity || DEFAULT_CITY);
+  };
+
+  return (
+    <div className="weather-app">
+      <WeatherHeader />
+
+      <main className="weather-main-content">
+        <div className="weather-container">
+          <CitySearch onSearch={handleSearch} loading={loading} />
+
+          <ErrorMessage message={error} onRetry={handleRetry} />
+
+          {loading && <LoadingState message="Getting weather data..." />}
+
+          {!loading && !error && currentWeather && (
+            <div className="weather-display-area">
+              <CurrentWeatherCard data={currentWeather} />
+              <ForecastGrid forecastData={forecastData} />
+            </div>
+          )}
         </div>
       </main>
 
-      <footer className="app-footer">
-        <div className="footer-container">
-          <span>Weather Forecast Agent • Decoupled Micro-Architecture</span>
-          <span className="footer-note">Initial Setup Ready</span>
+      <footer className="weather-footer">
+        <div className="weather-footer-container">
+          <span>Weather Agent</span>
+          <span className="footer-tag">Live meteorological forecasts</span>
         </div>
       </footer>
     </div>

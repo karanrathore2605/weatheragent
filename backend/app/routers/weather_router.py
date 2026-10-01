@@ -10,7 +10,7 @@ from app.clients.weather_client import (
     WeatherServiceUnavailableError,
     WeatherTimeoutError,
 )
-from app.schemas.weather_schema import WeatherErrorResponse, WeatherResponse
+from app.schemas.weather_schema import ForecastResponse, WeatherErrorResponse, WeatherResponse
 from app.services.weather_service import WeatherService
 from app.utils.logger import get_logger
 
@@ -100,4 +100,88 @@ def get_current_weather_endpoint(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while fetching weather data.",
+        ) from exc
+
+
+@router.get(
+    "/forecast",
+    response_model=ForecastResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get Weather Forecast",
+    description="Retrieve multi-day weather forecast for a specified city.",
+    responses={
+        200: {"model": ForecastResponse, "description": "Weather forecast retrieved successfully"},
+        400: {"model": WeatherErrorResponse, "description": "Invalid city or forecast days parameter"},
+        404: {"model": WeatherErrorResponse, "description": "City not found"},
+        429: {"model": WeatherErrorResponse, "description": "Weather provider rate limit exceeded"},
+        502: {"model": WeatherErrorResponse, "description": "Bad gateway or malformed provider response"},
+        503: {"model": WeatherErrorResponse, "description": "Weather service unavailable or authentication failed"},
+        504: {"model": WeatherErrorResponse, "description": "Weather provider request timed out"},
+    },
+)
+def get_weather_forecast_endpoint(
+    city: str = Query(
+        ...,
+        description="Name of the city (e.g. Indore, Delhi, London)",
+        examples=["Indore"],
+    ),
+    days: int = Query(
+        default=5,
+        description="Number of forecast days (1-10)",
+        examples=[5],
+    ),
+    service: WeatherService = Depends(get_weather_service),
+) -> ForecastResponse:
+    """Handle GET /forecast request."""
+    logger.info("Received request for forecast: city='%s', days=%s", city, days)
+
+    try:
+        return service.get_forecast(city=city, days=days)
+    except ValueError as exc:
+        logger.warning("Validation error for city '%s' / days '%s': %s", city, days, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except CityNotFoundError as exc:
+        logger.warning("City not found: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except WeatherAuthenticationError as exc:
+        logger.error("Authentication error accessing weather API: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Weather service authentication failed or API key is not configured.",
+        ) from exc
+    except WeatherRateLimitError as exc:
+        logger.error("Rate limit hit from weather provider: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Weather provider rate limit exceeded. Please try again later.",
+        ) from exc
+    except WeatherTimeoutError as exc:
+        logger.error("Timeout occurred while contacting weather provider: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Weather provider request timed out.",
+        ) from exc
+    except WeatherServiceUnavailableError as exc:
+        logger.error("Weather service provider unavailable: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Weather service is currently unavailable.",
+        ) from exc
+    except WeatherResponseParsingError as exc:
+        logger.error("Malformed forecast response received: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Received an invalid response from weather provider.",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error processing forecast for city '%s': %s", city, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while fetching forecast data.",
         ) from exc

@@ -1,9 +1,14 @@
-"""Unit tests for weather Pydantic schemas."""
+"""Unit tests for weather and forecast Pydantic schemas."""
 
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.weather_schema import WeatherResponse, WeatherErrorResponse
+from app.schemas.weather_schema import (
+    ForecastDay,
+    ForecastResponse,
+    WeatherErrorResponse,
+    WeatherResponse,
+)
 
 
 def test_weather_response_valid() -> None:
@@ -33,8 +38,50 @@ def test_weather_response_missing_required_field() -> None:
         WeatherResponse(
             city="Indore",
             temperature=28.4,
-            # missing feels_like, humidity, wind_speed, condition, observed_at
         )
+
+
+def test_forecast_day_schema_valid() -> None:
+    """Test valid instantiation of ForecastDay."""
+    day = ForecastDay(
+        date="2026-10-02",
+        temperature_min=24.5,
+        temperature_max=32.1,
+        condition="Sunny",
+        precipitation_probability=20,
+        humidity=60,
+        wind_speed=12.4,
+    )
+    assert day.date == "2026-10-02"
+    assert day.temperature_min == 24.5
+    assert day.temperature_max == 32.1
+    assert day.condition == "Sunny"
+    assert day.precipitation_probability == 20
+    assert day.humidity == 60
+    assert day.wind_speed == 12.4
+
+
+def test_forecast_response_valid() -> None:
+    """Test valid instantiation of ForecastResponse."""
+    response = ForecastResponse(
+        city="Indore",
+        forecast=[
+            ForecastDay(
+                date="2026-10-02",
+                temperature_min=24.5,
+                temperature_max=32.1,
+                condition="Sunny",
+                precipitation_probability=20,
+                humidity=60,
+                wind_speed=12.4,
+            )
+        ],
+        resolved_address="Indore, Madhya Pradesh, India",
+    )
+    assert response.city == "Indore"
+    assert len(response.forecast) == 1
+    assert response.forecast[0].date == "2026-10-02"
+    assert response.resolved_address == "Indore, Madhya Pradesh, India"
 
 
 def test_weather_error_response() -> None:

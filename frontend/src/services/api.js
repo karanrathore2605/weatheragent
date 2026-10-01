@@ -9,7 +9,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 /**
- * Generic JSON request wrapper with error handling.
+ * Generic JSON request wrapper with user-friendly error handling.
  */
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -25,21 +25,33 @@ async function request(endpoint, options = {}) {
     const response = await fetch(url, config);
     if (!response.ok) {
       const errorBody = await response.text();
-      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      let rawDetail = "";
       try {
         const parsed = JSON.parse(errorBody);
-        if (parsed.detail) {
-          errorMessage = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
-        }
+        rawDetail = parsed.detail || "";
       } catch {
-        if (errorBody) errorMessage = errorBody;
+        rawDetail = errorBody;
       }
-      throw new Error(errorMessage);
+
+      // Map status codes to clean user-facing error messages
+      if (response.status === 404) {
+        throw new Error("City not found. Please check the city name.");
+      }
+      if (response.status === 400) {
+        if (rawDetail.toLowerCase().includes("empty")) {
+          throw new Error("Please enter a city.");
+        }
+        throw new Error(rawDetail || "Invalid city name. Please try again.");
+      }
+      if (response.status === 503 || response.status === 504 || response.status === 502) {
+        throw new Error("Unable to get weather information right now. Please try again.");
+      }
+      throw new Error(rawDetail || "Unable to get weather information right now. Please try again.");
     }
     return await response.json();
   } catch (err) {
     if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error(`Unable to connect to backend at ${API_BASE_URL}. Ensure the backend server is running.`);
+      throw new Error("Unable to connect to backend server. Please verify backend is running.");
     }
     throw err;
   }
@@ -61,7 +73,31 @@ export async function getRootInfo() {
   return request("/");
 }
 
+/**
+ * Fetch current weather for a city.
+ * Calls GET /api/v1/weather/current?city=...
+ */
+export async function getCurrentWeather(city) {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  return request(`/api/v1/weather/current?city=${encodeURIComponent(city.trim())}`);
+}
+
+/**
+ * Fetch multi-day weather forecast for a city.
+ * Calls GET /api/v1/weather/forecast?city=...&days=...
+ */
+export async function getWeatherForecast(city, days = 5) {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  return request(`/api/v1/weather/forecast?city=${encodeURIComponent(city.trim())}&days=${days}`);
+}
+
 export default {
   getHealthStatus,
   getRootInfo,
+  getCurrentWeather,
+  getWeatherForecast,
 };

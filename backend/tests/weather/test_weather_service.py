@@ -1,5 +1,6 @@
 """Unit tests for WeatherService domain logic and normalization."""
 
+from typing import Any
 from unittest.mock import MagicMock
 import pytest
 
@@ -129,3 +130,99 @@ def test_get_current_weather_timeout(mock_client: MagicMock) -> None:
 
     with pytest.raises(WeatherTimeoutError):
         service.get_current_weather("Indore")
+
+
+def test_validate_forecast_days_valid() -> None:
+    """Test validation of valid forecast days."""
+    service = WeatherService()
+    assert service.validate_forecast_days(1) == 1
+    assert service.validate_forecast_days(5) == 5
+    assert service.validate_forecast_days(10) == 10
+    assert service.validate_forecast_days("7") == 7
+
+
+@pytest.mark.parametrize("invalid_days", [0, -1, -5, 11, 20, "abc", None])
+def test_validate_forecast_days_invalid(invalid_days: Any) -> None:
+    """Test validation errors for out-of-range or non-numeric forecast days."""
+    service = WeatherService()
+    with pytest.raises(ValueError):
+        service.validate_forecast_days(invalid_days)
+
+
+def test_normalize_forecast_data() -> None:
+    """Test normalization of multi-day forecast raw data."""
+    service = WeatherService()
+    location = {
+        "formatted_address": "Indore, Madhya Pradesh, India",
+    }
+    raw_forecast = {
+        "forecastDays": [
+            {
+                "interval": {"startTime": "2026-10-02T00:00:00Z"},
+                "daytimeForecast": {
+                    "temperature": {"min": 24.5, "max": 32.1},
+                    "weatherCondition": {"description": {"text": "Sunny"}},
+                    "precipitation": {"probability": 0.20},
+                    "humidity": {"relative": 60},
+                    "wind": {"speed": {"value": 12.4}},
+                },
+            },
+            {
+                "interval": {"startTime": "2026-10-03T00:00:00Z"},
+                "daytimeForecast": {
+                    "temperature": {"min": 23.0, "max": 31.0},
+                    "weatherCondition": {"description": {"text": "Partly Cloudy"}},
+                    "precipitation": {"probability": 15},
+                    "humidity": {"relative": 65},
+                    "wind": {"speed": {"value": 10.0}},
+                },
+            },
+        ]
+    }
+
+    result = service.normalize_forecast_data("Indore", location, raw_forecast, requested_days=2)
+    assert result.city == "Indore"
+    assert len(result.forecast) == 2
+
+    day1 = result.forecast[0]
+    assert day1.date == "2026-10-02"
+    assert day1.temperature_min == 24.5
+    assert day1.temperature_max == 32.1
+    assert day1.condition == "Sunny"
+    assert day1.precipitation_probability == 20
+    assert day1.humidity == 60
+    assert day1.wind_speed == 12.4
+
+    day2 = result.forecast[1]
+    assert day2.date == "2026-10-03"
+    assert day2.precipitation_probability == 15
+
+
+def test_get_forecast_flow(mock_client: MagicMock) -> None:
+    """Test full get_forecast execution flow."""
+    mock_client.get_forecast.return_value = {
+        "forecastDays": [
+            {
+                "interval": {"startTime": "2026-10-02T00:00:00Z"},
+                "daytimeForecast": {
+                    "temperature": {"min": 24.5, "max": 32.1},
+                    "weatherCondition": {"description": {"text": "Sunny"}},
+                    "precipitation": {"probability": 0.20},
+                    "humidity": {"relative": 60},
+                    "wind": {"speed": {"value": 12.4}},
+                },
+            }
+        ]
+    }
+    service = WeatherService(client=mock_client)
+    result = service.get_forecast("Indore", days=5)
+
+    mock_client.geocode_city.assert_called_with("Indore")
+    mock_client.get_forecast.assert_called_with(
+        latitude=22.7196,
+        longitude=75.8577,
+        days=5,
+    )
+    assert result.city == "Indore"
+    assert len(result.forecast) == 1
+

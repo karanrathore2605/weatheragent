@@ -2,10 +2,10 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.clients.weather_client import GoogleWeatherClient
-from app.schemas.weather_schema import WeatherResponse
+from app.schemas.weather_schema import ForecastDay, ForecastResponse, WeatherResponse
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -45,6 +45,24 @@ class WeatherService:
             raise ValueError("City name must contain alphabetic characters.")
 
         return trimmed
+
+    def validate_forecast_days(self, days: int) -> int:
+        """Validate requested forecast days parameter.
+        
+        Raises:
+            ValueError: If days is not a positive integer between 1 and 10.
+        """
+        if not isinstance(days, int):
+            try:
+                days = int(days)
+            except (ValueError, TypeError):
+                raise ValueError("Forecast days must be an integer.")
+
+        if days < 1 or days > 10:
+            logger.warning("Invalid forecast days requested: %s", days)
+            raise ValueError("Forecast days must be between 1 and 10.")
+
+        return days
 
     def normalize_weather_data(
         self,
@@ -101,10 +119,8 @@ class WeatherService:
         if not observed_at:
             observed_at = datetime.now(timezone.utc).isoformat()
         else:
-            # Clean trailing Z for standardized formatting if desired
             observed_at = str(observed_at)
 
-        # Extract primary city label from formatted address if available
         formatted_address = location.get("formatted_address", city_name)
         primary_city = formatted_address.split(",")[0].strip() if formatted_address else city_name
 
@@ -116,6 +132,108 @@ class WeatherService:
             wind_speed=round(float(raw_wind), 1),
             condition=condition_text or "Clear",
             observed_at=observed_at,
+            resolved_address=formatted_address,
+        )
+
+    def normalize_forecast_data(
+        self,
+        city_name: str,
+        location: Dict[str, Any],
+        raw_forecast: Dict[str, Any],
+        requested_days: int,
+    ) -> ForecastResponse:
+        """Normalize raw provider forecast data into canonical ForecastResponse schema."""
+        logger.debug("Normalizing forecast data for: %s (days=%s)", city_name, requested_days)
+
+        raw_days = raw_forecast.get("forecastDays") or raw_forecast.get("forecast") or []
+        forecast_items: List[ForecastDay] = []
+
+        for item in raw_days[:requested_days]:
+            # Extract date
+            interval = item.get("interval", {})
+            start_time = interval.get("startTime") if isinstance(interval, dict) else None
+            date_str = item.get("date") or (start_time[:10] if start_time else "")
+            if not date_str:
+                date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+            daytime = item.get("daytimeForecast", {})
+            if not isinstance(daytime, dict):
+                daytime = {}
+
+            # Temperatures
+            temp_obj = daytime.get("temperature") or item.get("temperature") or {}
+            if isinstance(temp_obj, dict):
+                min_t = temp_obj.get("min", item.get("temperature_min", 20.0))
+                max_t = temp_obj.get("max", item.get("temperature_max", 30.0))
+            else:
+                min_t = item.get("temperature_min", 20.0)
+                max_t = item.get("temperature_max", 30.0)
+
+            # Condition
+            cond_obj = daytime.get("weatherCondition") or item.get("weatherCondition") or {}
+            if isinstance(cond_obj, dict):
+                desc_obj = cond_obj.get("description", {})
+                if isinstance(desc_obj, dict):
+                    cond_text = desc_obj.get("text", item.get("condition", "Sunny"))
+                else:
+                    cond_text = str(desc_obj or item.get("condition", "Sunny"))
+            elif isinstance(cond_obj, str):
+                cond_text = cond_obj
+            else:
+                cond_text = item.get("condition", "Sunny")
+
+            # Precipitation probability
+            precip_obj = daytime.get("precipitation") or item.get("precipitation") or {}
+            if isinstance(precip_obj, dict):
+                p_prob = precip_obj.get("probability", item.get("precipitation_probability", 0))
+            else:
+                p_prob = item.get("precipitation_probability", 0)
+
+            # Convert 0.2 to 20 if decimal
+            if isinstance(p_prob, (int, float)):
+                if 0.0 < float(p_prob) <= 1.0:
+                    p_prob = int(round(float(p_prob) * 100))
+                else:
+                    p_prob = int(p_prob)
+            else:
+                p_prob = 0
+
+            # Humidity
+            hum_obj = daytime.get("humidity") or item.get("humidity") or {}
+            if isinstance(hum_obj, dict):
+                humidity_val = hum_obj.get("relative", item.get("humidity", 50))
+            else:
+                humidity_val = daytime.get("relativeHumidity", item.get("humidity", 50))
+
+            # Wind speed
+            wind_obj = daytime.get("wind") or item.get("wind") or {}
+            if isinstance(wind_obj, dict):
+                speed_val = wind_obj.get("speed", {})
+                if isinstance(speed_val, dict):
+                    wind_speed_val = speed_val.get("value", item.get("wind_speed", 10.0))
+                else:
+                    wind_speed_val = speed_val if speed_val is not None else item.get("wind_speed", 10.0)
+            else:
+                wind_speed_val = item.get("wind_speed", 10.0)
+
+            forecast_items.append(
+                ForecastDay(
+                    date=date_str,
+                    temperature_min=round(float(min_t or 0.0), 1),
+                    temperature_max=round(float(max_t or 0.0), 1),
+                    condition=str(cond_text or "Clear"),
+                    precipitation_probability=int(p_prob),
+                    humidity=int(humidity_val or 0),
+                    wind_speed=round(float(wind_speed_val or 0.0), 1),
+                )
+            )
+
+        formatted_address = location.get("formatted_address", city_name)
+        primary_city = formatted_address.split(",")[0].strip() if formatted_address else city_name
+
+        return ForecastResponse(
+            city=primary_city or city_name,
+            forecast=forecast_items,
             resolved_address=formatted_address,
         )
 
@@ -139,4 +257,29 @@ class WeatherService:
             city_name=valid_city,
             location=location,
             raw_conditions=raw_conditions,
+        )
+
+    def get_forecast(self, city: str, days: int = 5) -> ForecastResponse:
+        """Execute full forecast flow: validate -> geocode -> fetch forecast -> normalize."""
+        valid_city = self.validate_city_input(city)
+        valid_days = self.validate_forecast_days(days)
+
+        logger.info("Resolving %s-day weather forecast for city: %s", valid_days, valid_city)
+
+        # Step 1: Geocode city to coordinates
+        location = self.client.geocode_city(valid_city)
+
+        # Step 2: Query multi-day forecast using coordinates
+        raw_forecast = self.client.get_forecast(
+            latitude=location["latitude"],
+            longitude=location["longitude"],
+            days=valid_days,
+        )
+
+        # Step 3: Normalize to canonical ForecastResponse
+        return self.normalize_forecast_data(
+            city_name=valid_city,
+            location=location,
+            raw_forecast=raw_forecast,
+            requested_days=valid_days,
         )

@@ -177,3 +177,61 @@ class GoogleWeatherClient:
         except Exception as exc:
             logger.error("Failed to parse Google Weather API JSON response: %s", exc)
             raise WeatherResponseParsingError("Invalid JSON received from weather service.") from exc
+
+    def get_forecast(self, latitude: float, longitude: float, days: int = 5) -> Dict[str, Any]:
+        """Fetch multi-day weather forecast from Google Weather API.
+        
+        Args:
+            latitude: Geographic latitude
+            longitude: Geographic longitude
+            days: Number of forecast days (1-10)
+            
+        Returns:
+            Dict containing raw forecast days payload.
+        """
+        if not self.api_key:
+            logger.error("Weather API key is not configured")
+            raise WeatherAuthenticationError("Weather service API key is not configured.")
+
+        url = f"{self.weather_base_url}/forecast/days:lookup"
+        params = {
+            "key": self.api_key,
+            "location.latitude": latitude,
+            "location.longitude": longitude,
+            "days": days,
+            "unitsSystem": "METRIC",
+        }
+
+        logger.debug("Requesting forecast for lat=%s, lng=%s, days=%s", latitude, longitude, days)
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.get(url, params=params)
+        except httpx.TimeoutException as exc:
+            logger.error("Google Weather forecast request timed out")
+            raise WeatherTimeoutError("Weather forecast request timed out.") from exc
+        except httpx.RequestError as exc:
+            logger.error("Network error connecting to Google Weather forecast API: %s", str(exc))
+            raise WeatherServiceUnavailableError("Unable to reach weather service provider.") from exc
+
+        if response.status_code in (401, 403):
+            logger.error("Google Weather API authentication failed (HTTP %s)", response.status_code)
+            raise WeatherAuthenticationError("Weather service authentication failed.")
+
+        if response.status_code == 429:
+            logger.error("Google Weather API rate limit exceeded")
+            raise WeatherRateLimitError("Weather service rate limit exceeded.")
+
+        if response.status_code >= 500:
+            logger.error("Google Weather API provider error (HTTP %s)", response.status_code)
+            raise WeatherServiceUnavailableError("Weather service provider temporarily unavailable.")
+
+        if response.status_code != 200:
+            logger.error("Google Weather API returned unexpected status %s", response.status_code)
+            raise WeatherServiceUnavailableError("Unexpected response status from weather provider.")
+
+        try:
+            return response.json()
+        except Exception as exc:
+            logger.error("Failed to parse Google Weather forecast JSON response: %s", exc)
+            raise WeatherResponseParsingError("Invalid JSON received from weather service.") from exc
