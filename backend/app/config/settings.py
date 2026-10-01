@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Logging configuration
     log_level: str = "INFO"
 
+    # Weather API configuration
+    google_weather_api_key: str = ""
+    weather_api_timeout: float = 10.0
+    weather_api_base_url: str = "https://weather.googleapis.com/v1"
+    google_geocoding_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
+
     @field_validator("cors_origins", mode="after")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

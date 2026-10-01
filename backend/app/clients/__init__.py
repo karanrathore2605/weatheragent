@@ -1,6 +1,28 @@
 """Clients layer: Third-party API and external service communication wrappers.
 
 Architecture Rule:
-- Future branch: Google Weather API client, LLM providers (OpenAI, Gemini), Gmail client.
-- Service -> Client.
+- Service -> Client -> External API.
+- Clients encapsulate low-level protocol and authentication details.
 """
+
+from app.clients.weather_client import (
+    GoogleWeatherClient,
+    WeatherClientError,
+    CityNotFoundError,
+    WeatherAuthenticationError,
+    WeatherRateLimitError,
+    WeatherTimeoutError,
+    WeatherServiceUnavailableError,
+    WeatherResponseParsingError,
+)
+
+__all__ = [
+    "GoogleWeatherClient",
+    "WeatherClientError",
+    "CityNotFoundError",
+    "WeatherAuthenticationError",
+    "WeatherRateLimitError",
+    "WeatherTimeoutError",
+    "WeatherServiceUnavailableError",
+    "WeatherResponseParsingError",
+]

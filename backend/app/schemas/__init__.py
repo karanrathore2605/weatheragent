@@ -6,5 +6,6 @@ Architecture Rule:
 """
 
 from app.schemas.health import HealthResponse
+from app.schemas.weather_schema import WeatherResponse, WeatherErrorResponse
 
-__all__ = ["HealthResponse"]
+__all__ = ["HealthResponse", "WeatherResponse", "WeatherErrorResponse"]
