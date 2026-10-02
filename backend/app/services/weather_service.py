@@ -4,7 +4,13 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.clients.weather_client import GoogleWeatherClient
+from app.clients.open_meteo_client import OpenMeteoClient
+from app.clients.weather_client import (
+    GoogleWeatherClient,
+    WeatherAuthenticationError,
+    WeatherServiceUnavailableError,
+)
+from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import ForecastDay, ForecastResponse, WeatherResponse
 from app.utils.logger import get_logger
 
@@ -20,8 +26,18 @@ class WeatherService:
     - Router calls Service.
     """
 
-    def __init__(self, client: Optional[GoogleWeatherClient] = None) -> None:
+    def __init__(
+        self,
+        client: Optional[GoogleWeatherClient] = None,
+        fallback_client: Optional[Any] = None,
+        repository: Optional[WeatherObservationRepository] = None,
+    ) -> None:
         self.client = client or GoogleWeatherClient()
+        if client is None and fallback_client is None:
+            self.fallback_client = OpenMeteoClient()
+        else:
+            self.fallback_client = fallback_client
+        self.repository = repository
 
     def validate_city_input(self, city: str) -> str:
         """Validate requested city name string.
@@ -237,27 +253,105 @@ class WeatherService:
             resolved_address=formatted_address,
         )
 
+    def _persist_observation(
+        self,
+        weather_resp: WeatherResponse,
+        location: Dict[str, Any],
+        raw_conditions: Dict[str, Any],
+        source: str = "google",
+    ) -> None:
+        """Persist weather observation for statistics tracking if repository is configured.
+        
+        Uses deduplication based on city and observation timestamp.
+        Failures are safely logged and will never break current-weather queries.
+        """
+        if self.repository is None:
+            return
+
+        try:
+            observed_str = weather_resp.observed_at
+            try:
+                observed_dt = datetime.fromisoformat(observed_str.replace("Z", "+00:00"))
+            except Exception:
+                observed_dt = datetime.now(timezone.utc)
+
+            # Extract precipitation if provided
+            precip = 0.0
+            if "precipitation" in raw_conditions and isinstance(raw_conditions["precipitation"], dict):
+                precip = float(raw_conditions["precipitation"].get("amount", 0.0) or 0.0)
+            elif "precipitation" in raw_conditions and isinstance(raw_conditions["precipitation"], (int, float)):
+                precip = float(raw_conditions["precipitation"])
+
+            pressure = None
+            if "pressure" in raw_conditions and isinstance(raw_conditions["pressure"], dict):
+                pressure = float(raw_conditions["pressure"].get("value", 0.0) or 0.0)
+            elif "pressure" in raw_conditions and isinstance(raw_conditions["pressure"], (int, float)):
+                pressure = float(raw_conditions["pressure"])
+
+            self.repository.save_observation({
+                "city": weather_resp.city,
+                "latitude": float(location.get("latitude", 0.0)),
+                "longitude": float(location.get("longitude", 0.0)),
+                "observed_at": observed_dt,
+                "temperature": float(weather_resp.temperature),
+                "feels_like_temperature": float(weather_resp.feels_like),
+                "humidity": float(weather_resp.humidity),
+                "precipitation": precip,
+                "wind_speed": float(weather_resp.wind_speed),
+                "pressure": pressure,
+                "weather_condition": weather_resp.condition,
+                "source": source,
+            })
+        except Exception as exc:
+            logger.warning("Could not persist weather observation for city '%s': %s", weather_resp.city, exc)
+
     def get_current_weather(self, city: str) -> WeatherResponse:
         """Execute full flow: validate -> geocode -> fetch conditions -> normalize."""
         valid_city = self.validate_city_input(city)
 
         logger.info("Resolving current weather for city: %s", valid_city)
 
-        # Step 1: Geocode city to coordinates
-        location = self.client.geocode_city(valid_city)
+        try:
+            # Step 1: Geocode city to coordinates
+            location = self.client.geocode_city(valid_city)
 
-        # Step 2: Query current conditions using coordinates
-        raw_conditions = self.client.get_current_conditions(
-            latitude=location["latitude"],
-            longitude=location["longitude"],
-        )
+            # Step 2: Query current conditions using coordinates
+            raw_conditions = self.client.get_current_conditions(
+                latitude=location["latitude"],
+                longitude=location["longitude"],
+            )
 
-        # Step 3: Normalize to canonical schema
-        return self.normalize_weather_data(
-            city_name=valid_city,
-            location=location,
-            raw_conditions=raw_conditions,
-        )
+            # Step 3: Normalize to canonical schema
+            res = self.normalize_weather_data(
+                city_name=valid_city,
+                location=location,
+                raw_conditions=raw_conditions,
+            )
+
+            # Step 4: Persist observation for statistics
+            self._persist_observation(res, location, raw_conditions, source="google")
+
+            return res
+        except (WeatherAuthenticationError, WeatherServiceUnavailableError) as exc:
+            if self.fallback_client is not None:
+                logger.warning(
+                    "Primary weather provider unavailable (%s). Falling back to Open-Meteo for city: %s",
+                    exc,
+                    valid_city,
+                )
+                location = self.fallback_client.geocode_city(valid_city)
+                raw_conditions = self.fallback_client.get_current_conditions(
+                    latitude=location["latitude"],
+                    longitude=location["longitude"],
+                )
+                res = self.normalize_weather_data(
+                    city_name=valid_city,
+                    location=location,
+                    raw_conditions=raw_conditions,
+                )
+                self._persist_observation(res, location, raw_conditions, source="open-meteo")
+                return res
+            raise
 
     def get_forecast(self, city: str, days: int = 5) -> ForecastResponse:
         """Execute full forecast flow: validate -> geocode -> fetch forecast -> normalize."""
@@ -266,20 +360,41 @@ class WeatherService:
 
         logger.info("Resolving %s-day weather forecast for city: %s", valid_days, valid_city)
 
-        # Step 1: Geocode city to coordinates
-        location = self.client.geocode_city(valid_city)
+        try:
+            # Step 1: Geocode city to coordinates
+            location = self.client.geocode_city(valid_city)
 
-        # Step 2: Query multi-day forecast using coordinates
-        raw_forecast = self.client.get_forecast(
-            latitude=location["latitude"],
-            longitude=location["longitude"],
-            days=valid_days,
-        )
+            # Step 2: Query multi-day forecast using coordinates
+            raw_forecast = self.client.get_forecast(
+                latitude=location["latitude"],
+                longitude=location["longitude"],
+                days=valid_days,
+            )
 
-        # Step 3: Normalize to canonical ForecastResponse
-        return self.normalize_forecast_data(
-            city_name=valid_city,
-            location=location,
-            raw_forecast=raw_forecast,
-            requested_days=valid_days,
-        )
+            # Step 3: Normalize to canonical ForecastResponse
+            return self.normalize_forecast_data(
+                city_name=valid_city,
+                location=location,
+                raw_forecast=raw_forecast,
+                requested_days=valid_days,
+            )
+        except (WeatherAuthenticationError, WeatherServiceUnavailableError) as exc:
+            if self.fallback_client is not None:
+                logger.warning(
+                    "Primary weather provider unavailable (%s). Falling back to Open-Meteo for forecast: %s",
+                    exc,
+                    valid_city,
+                )
+                location = self.fallback_client.geocode_city(valid_city)
+                raw_forecast = self.fallback_client.get_forecast(
+                    latitude=location["latitude"],
+                    longitude=location["longitude"],
+                    days=valid_days,
+                )
+                return self.normalize_forecast_data(
+                    city_name=valid_city,
+                    location=location,
+                    raw_forecast=raw_forecast,
+                    requested_days=valid_days,
+                )
+            raise

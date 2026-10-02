@@ -1,6 +1,10 @@
 """Repositories layer: Data access and persistence abstractions.
 
 Architecture Rule:
-- Future branch: Encapsulates database queries for conversation memory and user history.
+- Encapsulates database queries.
 - Service -> Repository -> Model/Database.
 """
+
+from app.repositories.weather_observation_repository import WeatherObservationRepository
+
+__all__ = ["WeatherObservationRepository"]

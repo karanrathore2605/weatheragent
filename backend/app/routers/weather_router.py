@@ -19,9 +19,16 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/weather", tags=["Weather"])
 
 
-def get_weather_service() -> WeatherService:
-    """Dependency provider for WeatherService."""
-    return WeatherService()
+from typing import Optional
+from sqlalchemy.orm import Session
+
+from app.database.session import get_db
+from app.repositories.weather_observation_repository import WeatherObservationRepository
+
+def get_weather_service(db: Optional[Session] = Depends(get_db)) -> WeatherService:
+    """Dependency provider for WeatherService with repository for observation persistence."""
+    repository = WeatherObservationRepository(db) if db is not None else None
+    return WeatherService(repository=repository)
 
 
 @router.get(

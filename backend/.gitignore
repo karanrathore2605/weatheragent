@@ -30,3 +30,9 @@ htmlcov/
 # Environment files
 .env
 .env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+

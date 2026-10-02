@@ -2,6 +2,7 @@
 
 import json
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Union
 
 from pydantic import field_validator
@@ -40,6 +41,12 @@ class Settings(BaseSettings):
     weather_api_base_url: str = "https://weather.googleapis.com/v1"
     google_geocoding_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
 
+    # Database configuration
+    database_url: str = "sqlite:///./weatheragent.db"
+
+    # Statistics configuration
+    min_statistics_coverage: float = 70.0
+
     @field_validator("cors_origins", mode="after")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
@@ -55,7 +62,7 @@ class Settings(BaseSettings):
         return v
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(Path(__file__).resolve().parent.parent.parent / ".env", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

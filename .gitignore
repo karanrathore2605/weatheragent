@@ -42,7 +42,13 @@ dist-ssr/
 .env.local
 .env.*.local
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
 # IDEs & OS
+
 .vscode/
 .idea/
 *.swp

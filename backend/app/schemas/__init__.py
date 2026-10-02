@@ -9,8 +9,11 @@ from app.schemas.health import HealthResponse
 from app.schemas.weather_schema import (
     ForecastDay,
     ForecastResponse,
+    StatisticsPeriod,
     WeatherErrorResponse,
     WeatherResponse,
+    WeatherStatisticsRequest,
+    WeatherStatisticsResponse,
 )
 
 __all__ = [
@@ -19,4 +22,7 @@ __all__ = [
     "ForecastDay",
     "ForecastResponse",
     "WeatherErrorResponse",
+    "StatisticsPeriod",
+    "WeatherStatisticsRequest",
+    "WeatherStatisticsResponse",
 ]

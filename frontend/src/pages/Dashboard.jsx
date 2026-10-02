@@ -6,7 +6,9 @@ import {
   ErrorMessage,
   CurrentWeatherCard,
   ForecastGrid,
+  WeatherStatistics,
 } from "../components";
+
 import { getCurrentWeather, getWeatherForecast } from "../services/api";
 
 const DEFAULT_CITY = "Indore";
@@ -73,8 +75,10 @@ export function Dashboard() {
             <div className="weather-display-area">
               <CurrentWeatherCard data={currentWeather} />
               <ForecastGrid forecastData={forecastData} />
+              <WeatherStatistics city={activeCity} />
             </div>
           )}
+
         </div>
       </main>
 

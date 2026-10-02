@@ -4,3 +4,7 @@ Architecture Rule:
 - Database models define persistence structures.
 - Schemas are separate from database models.
 """
+
+from app.models.weather_observation import WeatherObservation
+
+__all__ = ["WeatherObservation"]

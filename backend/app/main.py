@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
+from app.database.session import init_db
 from app.routers.health import router as health_router
+from app.routers.statistics_router import router as statistics_router
 from app.routers.weather_router import router as weather_router
 from app.utils.logger import get_logger, setup_logging
 
@@ -25,6 +27,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.app_env,
     )
     logger.info("Allowed CORS origins: %s", settings.cors_origins)
+    # Initialize database tables
+    try:
+        init_db()
+    except Exception as exc:
+        logger.error("Database initialization failed: %s", exc)
     yield
     logger.info("Shutting down %s", settings.app_name)
 
@@ -53,6 +60,7 @@ def create_application() -> FastAPI:
     # Register Routers
     app.include_router(health_router)
     app.include_router(weather_router, prefix="/api/v1")
+    app.include_router(statistics_router, prefix="/api/v1")
 
     @app.get("/", tags=["Root"])
     def root():
@@ -65,6 +73,7 @@ def create_application() -> FastAPI:
             "health": "/health",
             "weather": "/api/v1/weather/current",
             "forecast": "/api/v1/weather/forecast",
+            "statistics": "/api/v1/weather/statistics",
         }
 
     return app

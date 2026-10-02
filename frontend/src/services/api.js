@@ -95,9 +95,24 @@ export async function getWeatherForecast(city, days = 5) {
   return request(`/api/v1/weather/forecast?city=${encodeURIComponent(city.trim())}&days=${days}`);
 }
 
+/**
+ * Fetch meteorological statistics for a city over a defined period (week, month, year).
+ * Calls GET /api/v1/weather/statistics?city=...&period=...
+ */
+export async function getWeatherStatistics(city, period = "week") {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  return request(
+    `/api/v1/weather/statistics?city=${encodeURIComponent(city.trim())}&period=${encodeURIComponent(period)}`
+  );
+}
+
 export default {
   getHealthStatus,
   getRootInfo,
   getCurrentWeather,
   getWeatherForecast,
+  getWeatherStatistics,
 };
+

@@ -100,9 +100,12 @@ Agent   ──►  Tool     ──►  Service  ──►  Client
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-6. Verify the Health Endpoint:
-   - URL: [http://localhost:8000/health](http://localhost:8000/health)
-   - Interactive Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+6. Verify Endpoints:
+   - Health Check: [http://localhost:8000/health](http://localhost:8000/health)
+   - Current Weather: [http://localhost:8000/api/v1/weather/current?city=Indore](http://localhost:8000/api/v1/weather/current?city=Indore)
+   - 5-Day Forecast: [http://localhost:8000/api/v1/weather/forecast?city=Indore&days=5](http://localhost:8000/api/v1/weather/forecast?city=Indore&days=5)
+   - Weather Statistics: [http://localhost:8000/api/v1/weather/statistics?city=Indore&period=week](http://localhost:8000/api/v1/weather/statistics?city=Indore&period=week)
+   - Interactive OpenAPI Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 7. Run Backend Tests:
    ```bash
@@ -139,3 +142,181 @@ Agent   ──►  Tool     ──►  Service  ──►  Client
 
 5. Open your browser:
    - Application URL: [http://localhost:5173](http://localhost:5173)
+
+---
+
+## Weather Statistics System
+
+A production-grade, deterministic meteorological statistics system powered by persistent observations and database aggregations.
+
+### Architecture Flow
+
+```
+Weather API
+    ↓
+Weather Client
+    ↓
+Weather Service
+    ↓
+Observation Repository
+    ↓
+Database (SQLAlchemy)
+    ↓
+Statistics Service
+    ↓
+Statistics Router
+    ↓
+Frontend Dashboard
+```
+
+### Deterministic Calculations (No LLM for Math)
+
+Numerical metrics are computed deterministically in backend code:
+- **Average Temperature**: `sum(temperatures) / valid_temperature_count`
+- **Minimum Temperature**: `min(temperatures)`
+- **Maximum Temperature**: `max(temperatures)`
+- **Average Feels-Like**: `sum(feels_like) / valid_feels_like_count`
+- **Average Humidity**: `sum(humidity) / valid_humidity_count`
+- **Average Wind Speed**: `sum(wind_speed) / valid_wind_speed_count`
+- **Total Precipitation**: `sum(valid_precipitation_amounts)`
+- **Data Coverage**: `(valid_observations / expected_period_hours) * 100`
+
+Missing or null values are safely ignored rather than falsely assumed as zero. LLMs are never used for numerical math.
+
+### Data Availability & Provider Limitations
+
+> **Important Provider Limitation**:
+> The Google Weather API's hourly historical data endpoint provides a maximum of **up to 24 hours** of historical observations. It **does NOT** provide full historical data for past weeks, months, or years directly.
+>
+> To solve this reliably in production:
+> 1. Weather observations are automatically captured and persisted in the application database whenever live weather queries occur.
+> 2. Observations are uniquely deduplicated by `(city, observed_at)`.
+> 3. The system enforces a configurable **Minimum Data Coverage Threshold** (`MIN_STATISTICS_COVERAGE=70.0%`).
+> 4. If the database has insufficient records for the requested period (coverage < 70%), the system returns a structured `insufficient_data` response with available ranges, rather than fabricating data or presenting misleading zeros.
+
+### Supported Aggregation Periods
+
+The system calculates statistics over calendar-based UTC periods:
+- **`week`**: Current ISO calendar week (Monday 00:00:00 UTC to Sunday 23:59:59 UTC, 168 expected hourly observations).
+- **`month`**: Current calendar month (1st day 00:00:00 UTC to last day 23:59:59 UTC).
+- **`year`**: Current calendar year (January 1 00:00:00 UTC to December 31 23:59:59 UTC).
+
+### API Specification
+
+#### Endpoint
+
+```http
+GET /api/v1/weather/statistics?city={city}&period={week|month|year}
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `city` | string | Yes | — | Target city name (e.g. `Indore`, `London`, `Tokyo`) |
+| `period` | string | No | `week` | Statistical horizon: `week`, `month`, or `year` |
+
+#### Example 1: Successful Response (Coverage ≥ 70%)
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/weather/statistics?city=Indore&period=week"
+```
+
+```json
+{
+  "status": "success",
+  "city": "Indore",
+  "period": "week",
+  "start_date": "2026-09-28",
+  "end_date": "2026-10-04",
+  "average_temperature": 28.4,
+  "minimum_temperature": 23.1,
+  "maximum_temperature": 33.7,
+  "average_feels_like_temperature": 30.1,
+  "average_humidity": 61.2,
+  "average_wind_speed": 11.8,
+  "total_precipitation": 12.4,
+  "observation_count": 135,
+  "coverage_percent": 80.4,
+  "available_from": null,
+  "available_to": null,
+  "message": null
+}
+```
+
+#### Example 2: Insufficient Data Response (Coverage < 70%)
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/weather/statistics?city=Indore&period=year"
+```
+
+```json
+{
+  "status": "insufficient_data",
+  "city": "Indore",
+  "period": "year",
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "average_temperature": null,
+  "minimum_temperature": null,
+  "maximum_temperature": null,
+  "average_feels_like_temperature": null,
+  "average_humidity": null,
+  "average_wind_speed": null,
+  "total_precipitation": null,
+  "observation_count": 24,
+  "coverage_percent": 0.3,
+  "available_from": "2026-10-01",
+  "available_to": "2026-10-02",
+  "message": "Not enough historical weather data is available for the requested period."
+}
+```
+
+### Database Configuration & Abstraction
+
+The persistence layer is built on **SQLAlchemy 2.0+** using environment-based configuration:
+
+```env
+# SQLite (default development)
+DATABASE_URL="sqlite:///./weatheragent.db"
+
+# PostgreSQL (production drop-in)
+# DATABASE_URL="postgresql+psycopg2://user:password@localhost:5432/weatheragent"
+```
+
+#### Weather Observation Database Model
+
+| Field | Type | Modifiers | Description |
+|-------|------|-----------|-------------|
+| `id` | Integer | Primary Key, Auto-increment | Observation unique identifier |
+| `city` | String(100) | Indexed, Not Null | Normalized city name |
+| `latitude` | Float | Not Null | Geocoded latitude |
+| `longitude` | Float | Not Null | Geocoded longitude |
+| `observed_at` | DateTime (UTC) | Indexed, Not Null | Observation timestamp |
+| `temperature` | Float | Not Null | Recorded temperature (°C) |
+| `feels_like_temperature` | Float | Nullable | Perceived temperature (°C) |
+| `humidity` | Float | Nullable | Relative humidity percentage |
+| `precipitation` | Float | Nullable, Default 0.0 | Precipitation amount (mm) |
+| `wind_speed` | Float | Nullable | Wind speed (km/h) |
+| `pressure` | Float | Nullable | Atmospheric pressure (hPa) |
+| `weather_condition` | String(100) | Nullable | Text condition description |
+| `source` | String(50) | Not Null, Default `google` | Origin provider |
+| `created_at` | DateTime (UTC) | Not Null | Record creation timestamp |
+
+- **Deduplication Constraint**: `UniqueConstraint("city", "observed_at", name="uq_city_observed_at")`
+- **Composite Index**: `Index("ix_weather_obs_city_observed_at", "city", "observed_at")`
+
+---
+
+## Environment Variables Reference
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `APP_NAME` | `Weather Forecast Agent API` | Service name |
+| `APP_ENV` | `development` | Deployment environment |
+| `PORT` | `8000` | Backend HTTP port |
+| `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed CORS origins |
+| `GOOGLE_WEATHER_API_KEY` | `""` | Google Maps / Weather API Key |
+| `DATABASE_URL` | `sqlite:///./weatheragent.db` | SQLAlchemy database connection URI |
+| `MIN_STATISTICS_COVERAGE` | `70.0` | Minimum observation coverage threshold (%) |
+

@@ -41,3 +41,47 @@ class WeatherErrorResponse(BaseModel):
     """Standard error response payload."""
 
     detail: str = Field(..., description="Human-readable error description")
+
+
+from enum import Enum
+
+
+class StatisticsPeriod(str, Enum):
+    """Supported time horizons for weather statistics aggregation."""
+
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+
+
+class WeatherStatisticsRequest(BaseModel):
+    """Validation schema for weather statistics query parameters."""
+
+    city: str = Field(..., min_length=1, description="Target city name", examples=["Indore"])
+    period: StatisticsPeriod = Field(
+        default=StatisticsPeriod.WEEK,
+        description="Aggregation time horizon ('week', 'month', 'year')",
+        examples=[StatisticsPeriod.WEEK],
+    )
+
+
+class WeatherStatisticsResponse(BaseModel):
+    """Structured response payload for weather statistics."""
+
+    status: str = Field("success", description="Status ('success' or 'insufficient_data')", examples=["success"])
+    city: str = Field(..., description="Target city name", examples=["Indore"])
+    period: str = Field(..., description="Statistical aggregation period ('week', 'month', 'year')", examples=["week"])
+    start_date: str = Field(..., description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-09-28"])
+    end_date: str = Field(..., description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-04"])
+    average_temperature: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[28.4])
+    minimum_temperature: Optional[float] = Field(None, description="Minimum temperature in Celsius", examples=[23.1])
+    maximum_temperature: Optional[float] = Field(None, description="Maximum temperature in Celsius", examples=[33.7])
+    average_feels_like_temperature: Optional[float] = Field(None, description="Average perceived temperature in Celsius", examples=[30.1])
+    average_humidity: Optional[float] = Field(None, description="Average relative humidity percentage", examples=[61.2])
+    average_wind_speed: Optional[float] = Field(None, description="Average wind speed in km/h", examples=[11.8])
+    total_precipitation: Optional[float] = Field(None, description="Total precipitation in mm", examples=[12.4])
+    observation_count: int = Field(..., description="Total observations used in calculation", examples=[96])
+    coverage_percent: float = Field(..., description="Data coverage percentage for the requested period", examples=[80.0])
+    available_from: Optional[str] = Field(None, description="Earliest available observation date if insufficient data", examples=["2026-09-30"])
+    available_to: Optional[str] = Field(None, description="Latest available observation date if insufficient data", examples=["2026-10-02"])
+    message: Optional[str] = Field(None, description="Status or guidance message", examples=["Not enough historical weather data is available for the requested period."])

@@ -5,3 +5,5 @@ export * from "./ErrorMessage";
 export * from "./CurrentWeatherCard";
 export * from "./ForecastCard";
 export * from "./ForecastGrid";
+export * from "./WeatherStatistics";
+
