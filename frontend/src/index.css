@@ -1028,7 +1028,7 @@ body {
 .hero-temp-header {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.5rem;
 }
 
 .hero-temp-badge {
@@ -1037,6 +1037,19 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--accent-cyan);
+}
+
+.hero-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.hero-city-title,
+.hero-period-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .hero-city-name {
@@ -1050,6 +1063,17 @@ body {
   font-size: 0.95rem;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+.hero-footer-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.footer-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .hero-temp-display {

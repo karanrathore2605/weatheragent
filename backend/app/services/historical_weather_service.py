@@ -1,176 +1,121 @@
-"""Historical Weather Service abstraction integrating with AccuWeather.
+"""Historical Weather Service abstraction integrating with Open-Meteo Archive API.
 
 Architecture Rules:
-- AccuWeather is the primary weather data provider for historical statistics.
-- Resolves city location keys via AccuWeather Locations API.
-- Retrieves available historical conditions from AccuWeather.
-- Database is used strictly for persistence/cache of AccuWeather observations.
+- Open-Meteo Historical Weather API is the primary provider for historical statistics.
+- Resolves city coordinates and timezone via Open-Meteo Geocoding API.
+- Retrieves daily mean temperatures from Open-Meteo Archive API.
 - Never fabricates or synthesizes missing historical weather data.
-- Never silently substitutes forecast data for historical data.
+- Database is not a required dependency for historical average calculations.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.clients.accuweather_client import AccuWeatherClient
 from app.clients.weather_client import (
     CityNotFoundError,
-    WeatherAuthenticationError,
     WeatherRateLimitError,
     WeatherResponseParsingError,
     WeatherServiceUnavailableError,
     WeatherTimeoutError,
 )
 from app.repositories.weather_observation_repository import WeatherObservationRepository
+from app.services.weather.open_meteo_client import OpenMeteoClient
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class HistoricalWeatherService:
-    """Service coordinating historical weather observation retrieval from AccuWeather and caching."""
+    """Service coordinating historical weather data retrieval from Open-Meteo Archive API."""
 
     def __init__(
         self,
-        accuweather_client: Optional[AccuWeatherClient] = None,
+        open_meteo_client: Optional[OpenMeteoClient] = None,
         repository: Optional[WeatherObservationRepository] = None,
         client: Optional[Any] = None,
     ) -> None:
-        self.client = accuweather_client or client or AccuWeatherClient()
+        self.open_meteo_client = open_meteo_client or client or OpenMeteoClient()
         self.repository = repository
 
-    def _normalize_iso_datetime(self, date_val: Any) -> datetime:
-        """Parse various date formats into a UTC-aware datetime."""
-        if isinstance(date_val, datetime):
-            if date_val.tzinfo is None:
-                return date_val.replace(tzinfo=timezone.utc)
-            return date_val.astimezone(timezone.utc)
-
-        if isinstance(date_val, (int, float)):
-            try:
-                return datetime.fromtimestamp(date_val, tz=timezone.utc)
-            except Exception:
-                return datetime.now(timezone.utc)
-
-        if not date_val:
-            return datetime.now(timezone.utc)
-
-        s = str(date_val).replace("Z", "+00:00")
-        try:
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                return dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except Exception:
-            return datetime.now(timezone.utc)
-
-    def _parse_accuweather_observations(
+    def fetch_historical_temperatures(
         self,
-        raw_items: List[Dict[str, Any]],
-        city_name: str,
-        location: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        """Parse raw AccuWeather historical current conditions array into canonical observation dicts."""
-        parsed = []
-        lat = float(location.get("latitude", 0.0))
-        lng = float(location.get("longitude", 0.0))
+        city: str,
+        start_date: str,
+        end_date: str,
+    ) -> Dict[str, Any]:
+        """Fetch daily historical temperatures for a city from Open-Meteo.
 
-        for item in raw_items:
-            # 1. Observation timestamp
-            raw_time = item.get("LocalObservationDateTime")
-            epoch_time = item.get("EpochTime")
-            if raw_time:
-                observed_dt = self._normalize_iso_datetime(raw_time)
-            elif epoch_time is not None:
-                observed_dt = self._normalize_iso_datetime(epoch_time)
-            else:
-                observed_dt = datetime.now(timezone.utc)
+        Args:
+            city: City name string (e.g. 'Indore', 'Delhi', 'Mumbai')
+            start_date: Start date string (YYYY-MM-DD)
+            end_date: End date string (YYYY-MM-DD)
 
-            # 2. Temperature in Celsius
-            temp_obj = item.get("Temperature", {})
-            metric_temp = temp_obj.get("Metric", {}) if isinstance(temp_obj, dict) else {}
-            temp_val = metric_temp.get("Value") if isinstance(metric_temp, dict) else None
-            if temp_val is None:
-                # Direct value fallback if already flattened
-                temp_val = item.get("temperature", 0.0)
+        Returns:
+            Dict containing resolved city name, coordinates, dates list, and temperatures list.
+        """
+        # Step 1: Resolve city to coordinates and timezone
+        location = self.open_meteo_client.geocode_city(city)
+        lat = location["latitude"]
+        lng = location["longitude"]
+        tz = location.get("timezone", "auto")
+        city_name = location.get("city", city)
 
-            # 3. Feels like temperature
-            real_feel = item.get("RealFeelTemperature", {})
-            metric_feel = real_feel.get("Metric", {}) if isinstance(real_feel, dict) else {}
-            feel_val = metric_feel.get("Value") if isinstance(metric_feel, dict) else None
+        # Step 2: Query Open-Meteo Archive API for daily mean temperatures
+        raw_archive = self.open_meteo_client.get_historical_weather(
+            latitude=lat,
+            longitude=lng,
+            start_date=start_date,
+            end_date=end_date,
+            timezone=tz,
+        )
 
-            # 4. Relative humidity
-            humidity = item.get("RelativeHumidity")
+        dates = raw_archive.get("time", [])
+        temperatures = raw_archive.get("temperature_2m_mean", [])
 
-            # 5. Condition text
-            condition_text = item.get("WeatherText", "Clear")
+        logger.info(
+            "Retrieved %d daily historical observations for city '%s' (%s to %s)",
+            len(temperatures),
+            city_name,
+            start_date,
+            end_date,
+        )
 
-            parsed.append({
-                "city": city_name,
-                "latitude": lat,
-                "longitude": lng,
-                "observed_at": observed_dt,
-                "temperature": float(temp_val) if temp_val is not None else 0.0,
-                "feels_like_temperature": float(feel_val) if feel_val is not None else None,
-                "humidity": float(humidity) if humidity is not None else None,
-                "precipitation": 0.0,
-                "wind_speed": None,
-                "pressure": None,
-                "weather_condition": str(condition_text),
-                "source": "accuweather",
-            })
-
-        return parsed
+        return {
+            "city": city_name,
+            "resolved_address": location.get("formatted_address"),
+            "latitude": lat,
+            "longitude": lng,
+            "timezone": tz,
+            "dates": dates,
+            "temperatures": temperatures,
+            "location": location,
+        }
 
     def fetch_and_get_observations(
         self,
         city: str,
-        start_date: datetime,
-        end_date: datetime,
-    ) -> Tuple[List[Any], Dict[str, Any]]:
-        """Fetch historical observations from AccuWeather, persist cache, and query window.
-        
-        Args:
-            city: Requested city name
-            start_date: Start of historical window (UTC)
-            end_date: End of historical window (UTC)
-            
-        Returns:
-            Tuple of (observations_list, resolved_location)
-        """
-        # Step 1: Resolve city to AccuWeather location key
-        location = self.client.search_location(city)
-        location_key = location["key"]
-        city_name = location.get("city", city)
+        start_date: Any,
+        end_date: Any,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """Legacy-compatible interface returning observation dicts and location info."""
+        s_date_str = start_date.strftime("%Y-%m-%d") if hasattr(start_date, "strftime") else str(start_date)[:10]
+        e_date_str = end_date.strftime("%Y-%m-%d") if hasattr(end_date, "strftime") else str(end_date)[:10]
 
-        # Step 2: Request historical conditions from AccuWeather (past 24h supported via Core API)
-        raw_history = self.client.get_historical_conditions(location_key=location_key, hours=24)
+        result = self.fetch_historical_temperatures(city, s_date_str, e_date_str)
+        location = result["location"]
+        dates = result["dates"]
+        temps = result["temperatures"]
 
-        # Step 3: Parse and normalize observations
-        parsed_obs = self._parse_accuweather_observations(
-            raw_items=raw_history,
-            city_name=city_name,
-            location=location,
-        )
-
-        # Step 4: Persist newly fetched observations into repository cache
-        if self.repository is not None:
-            for obs_dict in parsed_obs:
-                try:
-                    self.repository.save_observation(obs_dict)
-                except Exception as save_err:
-                    logger.debug("Could not persist observation for %s: %s", city_name, save_err)
-
-            # Query all available observations from persistent cache covering the window
-            observations = self.repository.get_observations_by_date_range(
-                city=city_name,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            observations = [
-                o for o in parsed_obs
-                if start_date <= o["observed_at"] <= end_date
-            ]
+        observations = []
+        for d, t in zip(dates, temps):
+            if t is not None:
+                observations.append({
+                    "city": result["city"],
+                    "latitude": result["latitude"],
+                    "longitude": result["longitude"],
+                    "observed_at": d,
+                    "temperature": float(t),
+                    "source": "open-meteo",
+                })
 
         return observations, location

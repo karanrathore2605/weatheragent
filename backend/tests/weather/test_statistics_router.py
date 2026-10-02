@@ -1,4 +1,4 @@
-"""Integration tests for weather statistics HTTP router with AccuWeather integration."""
+"""Integration tests for weather statistics HTTP router with Open-Meteo historical integration."""
 
 from unittest.mock import MagicMock
 import pytest
@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from app.clients.weather_client import (
     CityNotFoundError,
-    WeatherAuthenticationError,
     WeatherRateLimitError,
     WeatherServiceUnavailableError,
     WeatherTimeoutError,
@@ -33,44 +32,45 @@ def client(mock_stats_service: MagicMock) -> TestClient:
 
 
 def test_get_statistics_success(client: TestClient, mock_stats_service: MagicMock) -> None:
-    """Test successful GET /api/v1/weather/statistics?city=Indore&period_type=week&duration=1."""
+    """Test successful GET /api/v1/weather/statistics?city=Indore&period_type=month&duration=3."""
     mock_stats_service.calculate_average_weather.return_value = WeatherStatisticsResponse(
         status="SUCCESS",
         city="Indore",
-        provider="accuweather",
-        period_type="week",
-        duration=1,
-        period_value=1,
-        start_date="2026-09-25",
+        provider="open-meteo",
+        period_type="month",
+        duration=3,
+        period_value=3,
+        start_date="2026-07-02",
         end_date="2026-10-02",
-        average_temperature_celsius=31.8,
+        average_temperature_celsius=29.8,
+        observation_days=92,
+        coverage_percentage=100.0,
         data_coverage={"complete": True},
-        data_source="accuweather",
+        data_source="open-meteo",
         coverage=CoverageInfo(
-            requested="1 Week (7 days / 168 hours)",
-            available="168 hours (100.0%)",
+            requested="Previous 3 Months (92 days)",
+            available="92 days (100.0%)",
             complete=True,
             percent=100.0,
-            observation_count=168,
+            observation_count=92,
         ),
         statistics=StatisticsMetrics(
-            average_temperature=31.8,
+            average_temperature=29.8,
         ),
-        average_temperature=31.8,
-        coverage_percent=100.0,
-        observation_count=168,
     )
 
-    response = client.get("/api/v1/weather/statistics?city=Indore&period_type=week&duration=1")
+    response = client.get("/api/v1/weather/statistics?city=Indore&period_type=month&duration=3")
     assert response.status_code == 200
     data = response.json()
 
     assert data["status"] == "SUCCESS"
     assert data["city"] == "Indore"
-    assert data["provider"] == "accuweather"
-    assert data["period_type"] == "week"
-    assert data["duration"] == 1
-    assert data["average_temperature_celsius"] == 31.8
+    assert data["provider"] == "open-meteo"
+    assert data["period_type"] == "month"
+    assert data["duration"] == 3
+    assert data["average_temperature_celsius"] == 29.8
+    assert data["observation_days"] == 92
+    assert data["coverage_percentage"] == 100.0
     assert data["data_coverage"]["complete"] is True
 
 
@@ -79,24 +79,26 @@ def test_get_statistics_insufficient_data(client: TestClient, mock_stats_service
     mock_stats_service.calculate_average_weather.return_value = WeatherStatisticsResponse(
         status="INSUFFICIENT_HISTORICAL_DATA",
         city="Indore",
-        provider="accuweather",
+        provider="open-meteo",
         period_type="month",
         duration=12,
         period_value=12,
         start_date="2025-10-02",
         end_date="2026-10-02",
         average_temperature_celsius=None,
+        observation_days=0,
+        coverage_percentage=0.0,
         data_coverage={"complete": False},
-        data_source="accuweather",
+        data_source="open-meteo",
         coverage=CoverageInfo(
-            requested="12 Months",
-            available="24 hours",
+            requested="Previous 12 Months",
+            available="0 days",
             complete=False,
-            percent=0.3,
-            observation_count=24,
+            percent=0.0,
+            observation_count=0,
         ),
         statistics=None,
-        message="Historical weather data is not available for the complete requested period.",
+        message="Unable to retrieve historical weather data right now. Please try again.",
     )
 
     response = client.get("/api/v1/weather/statistics?city=Indore&period_type=month&duration=12")
@@ -105,11 +107,11 @@ def test_get_statistics_insufficient_data(client: TestClient, mock_stats_service
 
     assert data["status"] == "INSUFFICIENT_HISTORICAL_DATA"
     assert data["city"] == "Indore"
-    assert data["provider"] == "accuweather"
+    assert data["provider"] == "open-meteo"
     assert data["duration"] == 12
     assert data["data_coverage"]["complete"] is False
     assert data["average_temperature_celsius"] is None
-    assert "not available" in data["message"].lower()
+    assert "unable to retrieve" in data["message"].lower()
 
 
 def test_get_statistics_year_removed(client: TestClient) -> None:
@@ -141,19 +143,17 @@ def test_get_statistics_invalid_duration(client: TestClient) -> None:
     assert response.status_code == 400
     assert "Invalid month duration" in response.json()["detail"]
 
-    # Month: 6 and 12 are valid
+    # Month: 6 is valid
     mock_response = WeatherStatisticsResponse(
         status="SUCCESS",
         city="Indore",
-        provider="accuweather",
+        provider="open-meteo",
         period_type="month",
         duration=6,
         data_coverage={"complete": True},
         coverage=CoverageInfo(complete=True),
         average_temperature_celsius=32.0,
     )
-    # Testing that 6 is accepted without 400
-    # Client query param
     app.dependency_overrides[get_statistics_service] = lambda: MagicMock(
         calculate_average_weather=MagicMock(return_value=mock_response)
     )
@@ -177,15 +177,6 @@ def test_get_statistics_city_not_found(client: TestClient, mock_stats_service: M
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_get_statistics_auth_error(client: TestClient, mock_stats_service: MagicMock) -> None:
-    """Test WeatherAuthenticationError maps to HTTP 503."""
-    mock_stats_service.calculate_average_weather.side_effect = WeatherAuthenticationError("AccuWeather auth failed.")
-
-    response = client.get("/api/v1/weather/statistics?city=Indore&period=week")
-    assert response.status_code == 503
-    assert "authentication failed" in response.json()["detail"].lower()
-
-
 def test_get_statistics_rate_limit(client: TestClient, mock_stats_service: MagicMock) -> None:
     """Test WeatherRateLimitError maps to HTTP 429."""
     mock_stats_service.calculate_average_weather.side_effect = WeatherRateLimitError("Rate limit exceeded.")
@@ -196,21 +187,21 @@ def test_get_statistics_rate_limit(client: TestClient, mock_stats_service: Magic
 
 
 def test_get_statistics_timeout(client: TestClient, mock_stats_service: MagicMock) -> None:
-    """Test WeatherTimeoutError maps to HTTP 504."""
+    """Test WeatherTimeoutError maps to HTTP 504 with clean user message."""
     mock_stats_service.calculate_average_weather.side_effect = WeatherTimeoutError("Request timed out.")
 
     response = client.get("/api/v1/weather/statistics?city=Indore&period=week")
     assert response.status_code == 504
-    assert "timed out" in response.json()["detail"].lower()
+    assert "unable to retrieve historical weather data" in response.json()["detail"].lower()
 
 
 def test_get_statistics_service_unavailable(client: TestClient, mock_stats_service: MagicMock) -> None:
-    """Test WeatherServiceUnavailableError maps to HTTP 503."""
+    """Test WeatherServiceUnavailableError maps to HTTP 503 with clean user message."""
     mock_stats_service.calculate_average_weather.side_effect = WeatherServiceUnavailableError("Service down.")
 
     response = client.get("/api/v1/weather/statistics?city=Indore&period=week")
     assert response.status_code == 503
-    assert "unavailable" in response.json()["detail"].lower()
+    assert "unable to retrieve historical weather data" in response.json()["detail"].lower()
 
 
 def test_get_statistics_internal_error(client: TestClient, mock_stats_service: MagicMock) -> None:
@@ -219,4 +210,4 @@ def test_get_statistics_internal_error(client: TestClient, mock_stats_service: M
 
     response = client.get("/api/v1/weather/statistics?city=Indore&period=week")
     assert response.status_code == 500
-    assert "An error occurred while calculating weather statistics" in response.json()["detail"]
+    assert "unable to retrieve historical weather data" in response.json()["detail"].lower()

@@ -44,14 +44,19 @@ export function WeatherStatistics({ city }) {
 
     try {
       const data = await getWeatherStatistics(city.trim(), period, duration);
-      setStats(data);
-      setLastCalculated({
-        city: city.trim(),
-        period,
-        duration,
-      });
-    } catch (err) {
-      setError(err.message || "Failed to load weather statistics.");
+      if (data.status === "INSUFFICIENT_HISTORICAL_DATA") {
+        setError(data.message || "Unable to retrieve historical weather data right now. Please try again.");
+        setStats(null);
+      } else {
+        setStats(data);
+        setLastCalculated({
+          city: data.city || city.trim(),
+          period: data.period_type || period,
+          duration: data.duration || duration,
+        });
+      }
+    } catch (_err) {
+      setError("Unable to retrieve historical weather data right now. Please try again.");
       setStats(null);
     } finally {
       setLoading(false);
@@ -70,25 +75,25 @@ export function WeatherStatistics({ city }) {
       : `Previous ${targetDuration} Months`;
   };
 
-  const isInsufficient =
-    stats &&
-    (stats.status === "INSUFFICIENT_HISTORICAL_DATA" ||
-      stats.status === "insufficient_data" ||
-      stats.data_coverage?.complete === false ||
-      stats.coverage?.complete === false);
-
-  const isSuccess = stats && !isInsufficient;
+  const isSuccess = stats && stats.status !== "INSUFFICIENT_HISTORICAL_DATA";
 
   const avgTemp =
     stats?.average_temperature_celsius ??
     stats?.statistics?.average_temperature ??
     stats?.average_temperature;
 
+  const coverageDisplay =
+    stats?.coverage_percentage != null
+      ? `${stats.coverage_percentage}%`
+      : stats?.coverage_percent != null
+      ? `${stats.coverage_percent}%`
+      : "100%";
+
   return (
     <section className="statistics-section" aria-label="Weather Statistics">
       <div className="statistics-header">
         <div className="statistics-title-group">
-          <span className="current-badge">Historical Average</span>
+          <span className="current-badge">Historical Analysis</span>
           <h3 className="statistics-title">Weather Statistics</h3>
           <p className="statistics-subtitle">
             Historical temperature analysis for <strong className="city-highlight">{city}</strong>
@@ -154,17 +159,17 @@ export function WeatherStatistics({ city }) {
       {loading && (
         <div className="stats-loading" id="stats-loading-indicator">
           <div className="loading-spinner"></div>
-          <span>Calculating average temperature...</span>
+          <span>Calculating historical temperature...</span>
         </div>
       )}
 
-      {/* Error State */}
+      {/* Error / Failure State */}
       {!loading && error && (
         <div className="stats-error-card" id="stats-error-card">
           <span className="stats-error-icon">⚠️</span>
           <div className="stats-error-content">
-            <h4>Unable to calculate statistics</h4>
-            <p>{error}</p>
+            <h4>Unable to retrieve historical weather data right now.</h4>
+            <p>Please try again.</p>
             <button
               type="button"
               className="stats-retry-btn"
@@ -186,82 +191,31 @@ export function WeatherStatistics({ city }) {
         </div>
       )}
 
-      {/* Insufficient Data State */}
-      {!loading && !error && isInsufficient && (
-        <div className="insufficient-data-card" id="stats-insufficient-card">
-          <div className="insufficient-header">
-            <span className="insufficient-icon">📊</span>
-            <div>
-              <h4 className="insufficient-title">
-                Historical weather data is not available for the complete requested period.
-              </h4>
-              <p className="insufficient-desc">
-                AccuWeather provides recent historical observations. Extended period statistics require complete observation coverage to guarantee numerical accuracy without data fabrication.
-              </p>
-            </div>
-          </div>
-
-          <div className="insufficient-details-grid">
-            <div className="insufficient-metric">
-              <span className="metric-label">Target City</span>
-              <span className="metric-value">{stats.city || city}</span>
-            </div>
-
-            <div className="insufficient-metric">
-              <span className="metric-label">Requested Period</span>
-              <span className="metric-value">
-                {getPeriodDisplayLabel(stats.period_type || period, stats.duration || duration)}
-              </span>
-            </div>
-
-            <div className="insufficient-metric">
-              <span className="metric-label">Provider</span>
-              <span className="metric-value">AccuWeather</span>
-            </div>
-
-            <div className="insufficient-metric">
-              <span className="metric-label">Data Coverage</span>
-              <span className="metric-value coverage-low">Incomplete</span>
-            </div>
-          </div>
-
-          <div className="insufficient-footer-note">
-            💡 Historical observations originate from AccuWeather.
-          </div>
-        </div>
-      )}
-
-      {/* Successful Calculation: Main statistic is Average Temperature */}
+      {/* Successful Calculation: Historical Temperature Analysis */}
       {!loading && !error && isSuccess && (
         <div className="statistics-card-wrapper" id="stats-success-card">
-          <div className="stats-meta-bar">
-            <span className="stats-window-tag">
-              📍 <strong>{stats.city || city}</strong> &bull;{" "}
-              {lastCalculated
-                ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
-                : getPeriodDisplayLabel(period, duration)}
-              {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
-            </span>
-            <span className="stats-coverage-tag">
-              Source: AccuWeather
-            </span>
-          </div>
-
           <div className="average-temp-hero-card">
             <div className="hero-temp-header">
-              <span className="hero-temp-badge">AccuWeather Historical Analysis</span>
-              <span className="hero-city-name">{stats.city || city}</span>
-              <span className="hero-period-label">
-                {lastCalculated
-                  ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
-                  : getPeriodDisplayLabel(period, duration)}
-              </span>
+              <span className="hero-temp-badge">Historical Temperature Analysis</span>
+              <div className="hero-meta-row">
+                <span className="hero-city-title">City:</span>
+                <span className="hero-city-name">{lastCalculated ? lastCalculated.city : city}</span>
+              </div>
+              <div className="hero-meta-row">
+                <span className="hero-period-title">Period:</span>
+                <span className="hero-period-label">
+                  {lastCalculated
+                    ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
+                    : getPeriodDisplayLabel(period, duration)}
+                  {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
+                </span>
+              </div>
             </div>
 
             <div className="hero-temp-display">
               <span className="hero-temp-icon" aria-hidden="true">🌡️</span>
               <div className="hero-temp-details">
-                <span className="hero-temp-title">Average Temperature</span>
+                <span className="hero-temp-title">Average Temperature:</span>
                 <span className="hero-temp-value">
                   {avgTemp != null ? `${avgTemp}°C` : "N/A"}
                 </span>
@@ -269,8 +223,14 @@ export function WeatherStatistics({ city }) {
             </div>
 
             <div className="hero-temp-footer">
-              <span className="hero-source-tag">Source: <strong>AccuWeather</strong></span>
-              <span className="hero-status-tag">✓ Coverage: Complete</span>
+              <div className="hero-footer-item">
+                <span className="footer-label">Data Coverage:</span>
+                <span className="hero-status-tag">{coverageDisplay}</span>
+              </div>
+              <div className="hero-footer-item">
+                <span className="footer-label">Source:</span>
+                <span className="hero-source-tag"><strong>Open-Meteo</strong></span>
+              </div>
             </div>
           </div>
         </div>

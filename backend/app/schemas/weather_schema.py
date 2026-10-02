@@ -102,19 +102,21 @@ class WeatherStatisticsResponse(BaseModel):
     """Structured response payload for weather statistics."""
 
     city: str = Field(..., description="Target city name", examples=["Indore"])
-    provider: str = Field("accuweather", description="Weather data provider identifier", examples=["accuweather"])
+    provider: str = Field("open-meteo", description="Weather data provider identifier", examples=["open-meteo"])
     period_type: str = Field("week", description="Statistical aggregation period ('week' or 'month')", examples=["week"])
     duration: int = Field(1, description="Period duration value (1-4 for week; 1-12 for month)", examples=[1])
     period_value: int = Field(1, description="Period duration value alias", examples=[1])
-    start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-09-25"])
+    start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-07-02"])
     end_date: Optional[str] = Field(None, description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-02"])
-    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[31.8])
+    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[29.8])
+    observation_days: Optional[int] = Field(None, description="Number of valid daily observations used", examples=[92])
+    coverage_percentage: Optional[float] = Field(None, description="Data coverage percentage for the requested period", examples=[100.0])
     data_coverage: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"complete": True}, description="Data coverage details")
-    data_source: str = Field("accuweather", description="Weather data source identifier", examples=["accuweather"])
+    data_source: str = Field("open-meteo", description="Weather data source identifier", examples=["open-meteo"])
     coverage: CoverageInfo = Field(default_factory=lambda: CoverageInfo(complete=True), description="Coverage assessment details")
     statistics: Optional[StatisticsMetrics] = Field(None, description="Calculated meteorological statistics")
     status: str = Field("SUCCESS", description="Operation status ('SUCCESS' or 'INSUFFICIENT_HISTORICAL_DATA')", examples=["SUCCESS"])
-    message: Optional[str] = Field(None, description="Status or guidance message", examples=["Historical weather data is not available for the complete requested period."])
+    message: Optional[str] = Field(None, description="Status or guidance message", examples=["Unable to retrieve historical weather data right now. Please try again."])
 
     # Backward compatibility convenience fields
     period: Optional[str] = Field(None, description="Legacy period alias", examples=["week"])

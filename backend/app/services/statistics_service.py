@@ -1,11 +1,10 @@
-"""Statistics service for deterministic AccuWeather meteorological calculations and data sufficiency checks."""
+"""Statistics service for deterministic Open-Meteo historical weather calculations."""
 
 import calendar
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Tuple, Union
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from app.clients.accuweather_client import AccuWeatherClient
 from app.config.settings import settings
 from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import (
@@ -16,56 +15,57 @@ from app.schemas.weather_schema import (
 )
 from app.services.average_temperature_calculator import AverageTemperatureCalculator
 from app.services.historical_weather_service import HistoricalWeatherService
-from app.services.statistics_calculator import StatisticsCalculator
+from app.services.weather.open_meteo_client import OpenMeteoClient
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def subtract_months(dt: datetime, months: int) -> datetime:
-    """Accurately subtract a given number of months from a datetime in UTC."""
-    year = dt.year
-    month = dt.month - months
-    while month <= 0:
-        month += 12
-        year -= 1
-    max_day = calendar.monthrange(year, month)[1]
-    day = min(dt.day, max_day)
-    return dt.replace(year=year, month=month, day=day)
+def subtract_calendar_months(source_date: date, months: int) -> date:
+    """Accurately subtract a given number of calendar months from a date.
+
+    Proper calendar calculation handling leap years, variable days in months,
+    and clamping to the last valid day of the resulting month.
+    """
+    new_year = source_date.year
+    new_month = source_date.month - months
+    while new_month <= 0:
+        new_year -= 1
+        new_month += 12
+    max_days = calendar.monthrange(new_year, new_month)[1]
+    new_day = min(source_date.day, max_days)
+    return date(new_year, new_month, new_day)
 
 
 class StatisticsService:
-    """Production service for computing historical weather statistics using AccuWeather."""
+    """Service computing historical temperature statistics via Open-Meteo Archive API."""
 
     def __init__(
         self,
         historical_service: Optional[HistoricalWeatherService] = None,
         repository: Optional[WeatherObservationRepository] = None,
-        accuweather_client: Optional[AccuWeatherClient] = None,
-        client: Optional[Any] = None,
+        open_meteo_client: Optional[OpenMeteoClient] = None,
         min_coverage: Optional[float] = None,
-        calculator: Optional[StatisticsCalculator] = None,
         temperature_calculator: Optional[AverageTemperatureCalculator] = None,
+        calculator: Optional[Any] = None,
     ) -> None:
-        client_to_use = accuweather_client or client
         if historical_service is not None:
             self.historical_service = historical_service
         else:
             self.historical_service = HistoricalWeatherService(
-                accuweather_client=client_to_use,
+                open_meteo_client=open_meteo_client,
                 repository=repository,
             )
-        self.repository = repository or (self.historical_service.repository if self.historical_service else None)
+        self.repository = repository
         self.min_coverage = (
             min_coverage if min_coverage is not None else settings.min_statistics_coverage
         )
-        self.calculator = calculator or StatisticsCalculator()
         self.temperature_calculator = temperature_calculator or AverageTemperatureCalculator()
 
     @staticmethod
     def validate_city_input(city: str) -> str:
         """Validate city parameter.
-        
+
         Raises:
             ValueError: If city is empty or lacks alphabetic characters.
         """
@@ -87,9 +87,9 @@ class StatisticsService:
     @staticmethod
     def parse_period(period: Union[StatisticsPeriod, str]) -> StatisticsPeriod:
         """Parse and validate aggregation period string into enum.
-        
+
         Note: The 'year' option has been completely removed.
-        
+
         Raises:
             ValueError: If period is unsupported or if 'year' is requested.
         """
@@ -112,7 +112,7 @@ class StatisticsService:
     @staticmethod
     def validate_period_value(period: StatisticsPeriod, period_value: int) -> int:
         """Validate duration integer for the selected period.
-        
+
         Week: 1, 2, 3, 4
         Month: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
         """
@@ -138,46 +138,49 @@ class StatisticsService:
         cls,
         period: Union[StatisticsPeriod, str],
         period_value: Union[int, datetime] = 1,
-        reference_date: Optional[datetime] = None,
-    ) -> Tuple[datetime, datetime, int]:
-        """Compute UTC start and end bounds for the specified calendar period.
-        
-        Supports:
-        - 1-4 Weeks  -> previous 7, 14, 21, 28 calendar days
-        - 1-12 Months -> previous 1-12 calendar months
-        
+        reference_date: Optional[Union[date, datetime]] = None,
+    ) -> Tuple[date, date, int]:
+        """Compute calendar date bounds for the specified period and duration.
+
+        Week:
+        - 1 Week  = previous 7 days
+        - 2 Weeks = previous 14 days
+        - 3 Weeks = previous 21 days
+        - 4 Weeks = previous 28 days
+
+        Month:
+        - 1 to 12 Months = previous 1 to 12 calendar months (proper calendar calculation)
+
         Returns:
-            (start_date_utc, end_date_utc, expected_hourly_observations)
+            (start_date, end_date, expected_days)
         """
-        if isinstance(period_value, datetime):
+        if isinstance(period_value, datetime) or isinstance(period_value, date):
             reference_date = period_value
             period_value = 1
 
         period_enum = cls.parse_period(period)
         duration = cls.validate_period_value(period_enum, int(period_value))
 
-        ref = reference_date or datetime.now(timezone.utc)
-        if ref.tzinfo is None:
-            ref = ref.replace(tzinfo=timezone.utc)
+        if reference_date is None:
+            end_date = datetime.now(timezone.utc).date()
+        elif isinstance(reference_date, datetime):
+            end_date = reference_date.date()
         else:
-            ref = ref.astimezone(timezone.utc)
-
-        end_date = ref
+            end_date = reference_date
 
         if period_enum == StatisticsPeriod.WEEK:
             days = duration * 7
-            start_date = ref - timedelta(days=days)
-            expected_observations = days * 24
+            start_date = end_date - timedelta(days=days)
+            expected_days = days
 
         elif period_enum == StatisticsPeriod.MONTH:
-            start_date = subtract_months(ref, duration)
-            days = max(1, (end_date.date() - start_date.date()).days)
-            expected_observations = days * 24
+            start_date = subtract_calendar_months(end_date, duration)
+            expected_days = max(1, (end_date - start_date).days)
 
         else:
             raise ValueError(f"Unsupported period: {period_enum}")
 
-        return start_date, end_date, expected_observations
+        return start_date, end_date, expected_days
 
     def calculate_average_weather(
         self,
@@ -185,145 +188,137 @@ class StatisticsService:
         period: Union[StatisticsPeriod, str] = StatisticsPeriod.WEEK,
         period_value: int = 1,
         duration: Optional[int] = None,
-        reference_date: Optional[datetime] = None,
+        reference_date: Optional[Union[date, datetime]] = None,
     ) -> WeatherStatisticsResponse:
-        """Calculate deterministic AccuWeather historical statistics for a city over a defined duration.
-        
+        """Calculate deterministic average temperature for a city over a defined duration.
+
         Flow:
         1. Validate city, period, and duration.
-        2. Compute timezone-aware date range.
-        3. Request historical data via HistoricalWeatherService (AccuWeather).
-        4. Validate data coverage against threshold.
-        5. If coverage is incomplete, return INSUFFICIENT_HISTORICAL_DATA response without fake numbers.
-        6. Compute average temperature via AverageTemperatureCalculator.
-        7. Return structured WeatherStatisticsResponse.
+        2. Compute date range (previous 7-28 days or 1-12 calendar months).
+        3. Request historical data via HistoricalWeatherService (Open-Meteo Archive API).
+        4. Validate temperature data, filter nulls without fabricating numbers.
+        5. Compute average temperature via AverageTemperatureCalculator.
+        6. Return structured WeatherStatisticsResponse.
         """
         valid_city = self.validate_city_input(city)
         period_enum = self.parse_period(period)
         effective_duration = duration if duration is not None else period_value
         valid_duration = self.validate_period_value(period_enum, effective_duration)
 
-        start_date, end_date, expected_obs = self.get_date_range(
+        start_date, end_date, expected_days = self.get_date_range(
             period=period_enum,
             period_value=valid_duration,
             reference_date=reference_date,
         )
 
-        period_label = f"{valid_duration} {period_enum.value.title() if valid_duration == 1 else period_enum.value.title() + 's'}"
-        expected_days = max(1, (end_date.date() - start_date.date()).days)
+        period_label = (
+            f"Previous {valid_duration} {period_enum.value.title() if valid_duration == 1 else period_enum.value.title() + 's'}"
+        )
 
         logger.info(
-            "Computing %s historical statistics for '%s' (%s to %s, expected_hours=%s) via AccuWeather",
+            "Computing %s historical statistics for '%s' (%s to %s, expected_days=%s) via Open-Meteo",
             period_label,
             valid_city,
             start_date.isoformat(),
             end_date.isoformat(),
-            expected_obs,
+            expected_days,
         )
 
-        # Retrieve observations from AccuWeather via HistoricalWeatherService
-        observations, location = self.historical_service.fetch_and_get_observations(
+        # Retrieve observations from Open-Meteo via HistoricalWeatherService
+        result = self.historical_service.fetch_historical_temperatures(
             city=valid_city,
-            start_date=start_date,
-            end_date=end_date,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
         )
 
-        obs_count = len(observations)
+        resolved_city = result.get("city", valid_city)
+        raw_temperatures = result.get("temperatures", [])
+
+        # Filter genuinely missing / null observations
+        valid_temps: List[float] = []
+        for t in raw_temperatures:
+            if t is not None:
+                try:
+                    valid_temps.append(float(t))
+                except (ValueError, TypeError):
+                    continue
+
+        observation_days = len(valid_temps)
         coverage_percent = round(
-            min(100.0, (obs_count / expected_obs) * 100.0) if expected_obs > 0 else 0.0,
+            min(100.0, (observation_days / expected_days) * 100.0) if expected_days > 0 else 0.0,
             1,
         )
 
-        # Sufficient coverage requires reaching threshold percentage and having observations
-        is_complete = (obs_count >= int(expected_obs * (self.min_coverage / 100.0))) and (obs_count > 0)
-
-        # Query available range for guidance if database repository exists
-        earliest_str, latest_str = None, None
-        if self.repository is not None and hasattr(self.repository, "check_available_data_range"):
-            earliest, latest = self.repository.check_available_data_range(valid_city)
-            if earliest:
-                earliest_str = earliest.strftime("%Y-%m-%d")
-            if latest:
-                latest_str = latest.strftime("%Y-%m-%d")
-
-        if not is_complete:
-            logger.info(
-                "Incomplete AccuWeather coverage for '%s' (%s): %d/%d hours (%.1f%% < %.1f%%)",
-                valid_city,
+        # Insufficient data condition: 0 observations or below minimum coverage
+        if observation_days == 0 or coverage_percent < self.min_coverage:
+            logger.warning(
+                "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
+                resolved_city,
                 period_label,
-                obs_count,
-                expected_obs,
+                observation_days,
+                expected_days,
                 coverage_percent,
                 self.min_coverage,
             )
             return WeatherStatisticsResponse(
-                city=valid_city,
-                provider="accuweather",
+                city=resolved_city,
+                provider="open-meteo",
                 period_type=period_enum.value,
                 duration=valid_duration,
                 period_value=valid_duration,
-                start_date=start_date.strftime("%Y-%m-%d"),
-                end_date=end_date.strftime("%Y-%m-%d"),
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
                 average_temperature_celsius=None,
+                observation_days=observation_days,
+                coverage_percentage=coverage_percent,
                 data_coverage={"complete": False},
-                status="INSUFFICIENT_HISTORICAL_DATA",
-                message="Historical weather data is not available for the complete requested period.",
-                data_source="accuweather",
+                data_source="open-meteo",
                 coverage=CoverageInfo(
-                    requested=f"{period_label} ({expected_days} days / {expected_obs} hours)",
-                    available=f"{obs_count} hours ({coverage_percent}%)",
+                    requested=f"{period_label} ({expected_days} days)",
+                    available=f"{observation_days} days ({coverage_percent}%)",
                     complete=False,
                     percent=coverage_percent,
-                    observation_count=obs_count,
+                    observation_count=observation_days,
                 ),
                 statistics=None,
+                status="INSUFFICIENT_HISTORICAL_DATA",
+                message="Unable to retrieve historical weather data right now. Please try again.",
                 period=period_enum.value,
                 average_temperature=None,
                 coverage_percent=coverage_percent,
-                observation_count=obs_count,
-                available_from=earliest_str,
-                available_to=latest_str,
+                observation_count=observation_days,
             )
 
-        # Calculate average temperature strictly from observations without fabrication
-        avg_temp = self.temperature_calculator.calculate_average_temperature(observations)
-        metrics = self.calculator.calculate(observations)
+        # Calculate pure average temperature strictly from valid daily mean observations
+        avg_temp = self.temperature_calculator.calculate_average_temperature(valid_temps)
 
         return WeatherStatisticsResponse(
-            city=valid_city,
-            provider="accuweather",
+            city=resolved_city,
+            provider="open-meteo",
             period_type=period_enum.value,
             duration=valid_duration,
             period_value=valid_duration,
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
             average_temperature_celsius=avg_temp,
+            observation_days=observation_days,
+            coverage_percentage=coverage_percent,
             data_coverage={"complete": True},
-            status="SUCCESS",
-            message=None,
-            data_source="accuweather",
+            data_source="open-meteo",
             coverage=CoverageInfo(
-                requested=f"{period_label} ({expected_days} days / {expected_obs} hours)",
-                available=f"{obs_count} hours ({coverage_percent}%)",
+                requested=f"{period_label} ({expected_days} days)",
+                available=f"{observation_days} days ({coverage_percent}%)",
                 complete=True,
                 percent=coverage_percent,
-                observation_count=obs_count,
+                observation_count=observation_days,
             ),
             statistics=StatisticsMetrics(
                 average_temperature=avg_temp,
-                minimum_temperature=metrics.get("minimum_temperature"),
-                maximum_temperature=metrics.get("maximum_temperature"),
-                average_feels_like_temperature=metrics.get("average_feels_like_temperature"),
-                average_humidity=metrics.get("average_humidity"),
-                average_wind_speed=metrics.get("average_wind_speed"),
-                total_precipitation=metrics.get("total_precipitation", 0.0),
             ),
+            status="SUCCESS",
+            message=None,
             period=period_enum.value,
             average_temperature=avg_temp,
-            minimum_temperature=metrics.get("minimum_temperature"),
-            maximum_temperature=metrics.get("maximum_temperature"),
             coverage_percent=coverage_percent,
-            observation_count=obs_count,
-            available_from=earliest_str,
-            available_to=latest_str,
+            observation_count=observation_days,
         )

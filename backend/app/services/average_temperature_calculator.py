@@ -3,7 +3,8 @@
 Architecture Rules:
 - Pure calculation logic only (no I/O, no DB, no network, no LLMs).
 - Calculates average temperature in degrees Celsius.
-- Strictly deterministic, rounds to 1 decimal place.
+- Strictly deterministic, rounds to 1 decimal place:
+  sum(valid daily mean temperatures) / number of valid daily observations
 - Never fabricates missing or fake values.
 - Gracefully ignores null/missing temperature values.
 """
@@ -20,10 +21,10 @@ class AverageTemperatureCalculator:
     @staticmethod
     def calculate_average_temperature(observations: List[Any]) -> Optional[float]:
         """Compute the average temperature in Celsius from weather observations.
-        
+
         Args:
-            observations: List of observation dictionaries or models.
-            
+            observations: List of daily temperatures (floats/ints), observation dicts, or models.
+
         Returns:
             Float rounded to 1 decimal place, or None if no valid temperature values exist.
         """
@@ -33,11 +34,22 @@ class AverageTemperatureCalculator:
 
         temps: List[float] = []
         for obs in observations:
+            if obs is None:
+                continue
+
             val = None
-            if isinstance(obs, dict):
+            if isinstance(obs, (int, float)):
+                val = obs
+            elif isinstance(obs, dict):
                 val = obs.get("temperature")
+                if val is None:
+                    val = obs.get("temperature_2m_mean")
+                if val is None:
+                    val = obs.get("temp")
             else:
                 val = getattr(obs, "temperature", None)
+                if val is None:
+                    val = getattr(obs, "temperature_2m_mean", None)
 
             if val is not None:
                 try:

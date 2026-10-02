@@ -1,10 +1,9 @@
-"""Weather statistics routing and HTTP request/response validation using AccuWeather."""
+"""Weather statistics routing and HTTP request/response validation using Open-Meteo."""
 
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.clients.accuweather_client import AccuWeatherClient
 from app.clients.weather_client import (
     CityNotFoundError,
     WeatherAuthenticationError,
@@ -14,13 +13,13 @@ from app.clients.weather_client import (
     WeatherTimeoutError,
 )
 from app.database.session import get_db
-from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import (
     WeatherErrorResponse,
     WeatherStatisticsResponse,
 )
 from app.services.historical_weather_service import HistoricalWeatherService
 from app.services.statistics_service import StatisticsService
+from app.services.weather.open_meteo_client import OpenMeteoClient
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,17 +28,14 @@ router = APIRouter(prefix="/weather", tags=["Weather Statistics"])
 
 
 def get_statistics_service(db: Session = Depends(get_db)) -> StatisticsService:
-    """Dependency provider injecting repository and HistoricalWeatherService with AccuWeatherClient."""
-    repository = WeatherObservationRepository(db)
-    accuweather_client = AccuWeatherClient()
+    """Dependency provider injecting OpenMeteoClient and HistoricalWeatherService."""
+    open_meteo_client = OpenMeteoClient()
     historical_service = HistoricalWeatherService(
-        accuweather_client=accuweather_client,
-        repository=repository,
+        open_meteo_client=open_meteo_client,
     )
     return StatisticsService(
         historical_service=historical_service,
-        repository=repository,
-        accuweather_client=accuweather_client,
+        open_meteo_client=open_meteo_client,
     )
 
 
@@ -47,25 +43,25 @@ def get_statistics_service(db: Session = Depends(get_db)) -> StatisticsService:
     "/statistics",
     response_model=WeatherStatisticsResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get Weather Statistics",
-    description="Compute deterministic AccuWeather historical weather statistics for a city over 1-4 weeks or 1-12 months.",
+    summary="Get Historical Weather Statistics",
+    description="Compute average temperature for a city over 1-4 weeks or 1-12 months via Open-Meteo Historical Weather API.",
     responses={
         200: {
             "model": WeatherStatisticsResponse,
-            "description": "Weather statistics or insufficient data report retrieved successfully",
+            "description": "Historical weather statistics retrieved successfully",
         },
         400: {"model": WeatherErrorResponse, "description": "Invalid city or unsupported statistics period/duration"},
         404: {"model": WeatherErrorResponse, "description": "City not found"},
         429: {"model": WeatherErrorResponse, "description": "Rate limit exceeded"},
         500: {"model": WeatherErrorResponse, "description": "Internal server or computation error"},
-        503: {"model": WeatherErrorResponse, "description": "AccuWeather service provider unavailable"},
-        504: {"model": WeatherErrorResponse, "description": "AccuWeather service provider timed out"},
+        503: {"model": WeatherErrorResponse, "description": "Historical weather service provider unavailable"},
+        504: {"model": WeatherErrorResponse, "description": "Historical weather service provider timed out"},
     },
 )
 def get_weather_statistics_endpoint(
     city: str = Query(
         ...,
-        description="Name of the city (e.g. Indore, Delhi, London)",
+        description="Name of the city (e.g. Indore, Delhi, Mumbai, Pune)",
         examples=["Indore"],
     ),
     period_type: Optional[str] = Query(
@@ -91,12 +87,11 @@ def get_weather_statistics_endpoint(
     service: StatisticsService = Depends(get_statistics_service),
 ) -> WeatherStatisticsResponse:
     """Handle GET /api/v1/weather/statistics request."""
-    # Determine period and duration from primary and fallback query params
     effective_period = (period_type if period_type is not None else (period or "week")).strip().lower()
     effective_duration = duration if duration is not None else (period_value if period_value is not None else 1)
 
     logger.info(
-        "Received statistics request: city='%s', period='%s', duration=%s",
+        "Received historical statistics request: city='%s', period='%s', duration=%s",
         city,
         effective_period,
         effective_duration,
@@ -153,38 +148,32 @@ def get_weather_statistics_endpoint(
             detail=str(exc),
         ) from exc
     except WeatherTimeoutError as exc:
-        logger.error("AccuWeather service timed out for statistics: %s", exc)
+        logger.error("Historical weather service timed out: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="AccuWeather service request timed out.",
+            detail="Unable to retrieve historical weather data right now. Please try again.",
         ) from exc
     except WeatherRateLimitError as exc:
-        logger.error("AccuWeather rate limit exceeded: %s", exc)
+        logger.error("Historical weather rate limit exceeded: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="AccuWeather API rate limit exceeded.",
-        ) from exc
-    except WeatherAuthenticationError as exc:
-        logger.error("AccuWeather authentication failed: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AccuWeather service authentication failed. Check API credentials.",
+            detail="Historical weather service rate limit exceeded. Please try again later.",
         ) from exc
     except WeatherServiceUnavailableError as exc:
-        logger.error("AccuWeather service unavailable: %s", exc)
+        logger.error("Historical weather service unavailable: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AccuWeather service is temporarily unavailable. Please try again later.",
+            detail="Unable to retrieve historical weather data right now. Please try again.",
         ) from exc
     except WeatherResponseParsingError as exc:
-        logger.error("AccuWeather response parsing failed: %s", exc)
+        logger.error("Historical weather response parsing failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Unable to parse response from AccuWeather service.",
+            detail="Unable to retrieve historical weather data right now. Please try again.",
         ) from exc
     except Exception as exc:
         logger.exception("Unexpected error calculating statistics for city='%s': %s", city, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while calculating weather statistics.",
+            detail="Unable to retrieve historical weather data right now. Please try again.",
         ) from exc
