@@ -7,8 +7,10 @@ Architecture Rule:
 
 from app.schemas.health import HealthResponse
 from app.schemas.weather_schema import (
+    CoverageInfo,
     ForecastDay,
     ForecastResponse,
+    StatisticsMetrics,
     StatisticsPeriod,
     WeatherErrorResponse,
     WeatherResponse,
@@ -17,10 +19,12 @@ from app.schemas.weather_schema import (
 )
 
 __all__ = [
+    "CoverageInfo",
     "HealthResponse",
     "WeatherResponse",
     "ForecastDay",
     "ForecastResponse",
+    "StatisticsMetrics",
     "WeatherErrorResponse",
     "StatisticsPeriod",
     "WeatherStatisticsRequest",

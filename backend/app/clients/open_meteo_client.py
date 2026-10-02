@@ -215,3 +215,68 @@ class OpenMeteoClient:
             })
 
         return {"forecast": forecast_days}
+
+    def get_historical_hours(self, latitude: float, longitude: float, hours: int = 24) -> Dict[str, Any]:
+        """Fetch past hourly weather observations from Open-Meteo as fallback."""
+        safe_hours = max(1, min(int(hours), 24))
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "hourly": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation",
+            "timezone": "auto",
+            "past_hours": safe_hours,
+            "forecast_hours": 0,
+        }
+        logger.debug("Open-Meteo requesting %s historical hours for lat=%s, lng=%s", safe_hours, latitude, longitude)
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.get(self.weather_base_url, params=params)
+        except httpx.TimeoutException as exc:
+            logger.error("Open-Meteo historical request timed out")
+            raise WeatherTimeoutError("Weather historical request timed out.") from exc
+        except httpx.RequestError as exc:
+            logger.error("Open-Meteo network error: %s", str(exc))
+            raise WeatherServiceUnavailableError("Unable to reach weather service.") from exc
+
+        if response.status_code != 200:
+            logger.error("Open-Meteo historical returned status %s", response.status_code)
+            raise WeatherServiceUnavailableError("Weather service returned an error.")
+
+        try:
+            payload = response.json()
+        except Exception as exc:
+            logger.error("Failed to parse Open-Meteo historical JSON: %s", exc)
+            raise WeatherResponseParsingError("Invalid JSON from weather service.") from exc
+
+        hourly = payload.get("hourly", {})
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        feels = hourly.get("apparent_temperature", [])
+        humidities = hourly.get("relative_humidity_2m", [])
+        winds = hourly.get("wind_speed_10m", [])
+        precips = hourly.get("precipitation", [])
+        codes = hourly.get("weather_code", [])
+
+        history_hours = []
+        for i, t in enumerate(times[-safe_hours:]):
+            idx = len(times) - safe_hours + i
+            temp_val = temps[idx] if idx < len(temps) else 20.0
+            feel_val = feels[idx] if idx < len(feels) else temp_val
+            hum_val = humidities[idx] if idx < len(humidities) else 50
+            wind_val = winds[idx] if idx < len(winds) else 10.0
+            precip_val = precips[idx] if idx < len(precips) else 0.0
+            code_val = codes[idx] if idx < len(codes) else 0
+
+            history_hours.append({
+                "interval": {"startTime": t},
+                "temperature": {"degrees": temp_val},
+                "feelsLikeTemperature": {"degrees": feel_val},
+                "relativeHumidity": hum_val,
+                "wind": {"speed": {"value": wind_val}},
+                "precipitation": {"amount": precip_val},
+                "weatherCondition": {"description": {"text": WMO_WEATHER_CODES.get(code_val, "Clear")}},
+            })
+
+        return {"historyHours": history_hours}
+
