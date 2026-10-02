@@ -7,7 +7,12 @@ from typing import Optional, Tuple, Union
 
 from app.config.settings import settings
 from app.repositories.weather_observation_repository import WeatherObservationRepository
-from app.schemas.weather_schema import StatisticsPeriod, WeatherStatisticsResponse
+from app.schemas.weather_schema import (
+    StatisticsPeriod,
+    WeatherMetrics,
+    WeatherStatisticsResponse,
+    WeatherSummaryResponse,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +26,7 @@ class StatisticsService:
     - No LLM invocation for numerical computations.
     - Evaluates data coverage before returning statistics.
     - Returns structured insufficient_data responses when coverage is below threshold.
+    - If data is insufficient, LLM is NEVER called.
     - Date calculations are timezone-aware in UTC.
     """
 
@@ -28,11 +34,18 @@ class StatisticsService:
         self,
         repository: WeatherObservationRepository,
         min_coverage: Optional[float] = None,
+        llm_service: Optional[Any] = None,
     ) -> None:
         self.repository = repository
         self.min_coverage = (
             min_coverage if min_coverage is not None else settings.min_statistics_coverage
         )
+        if llm_service is not None:
+            self.llm_service = llm_service
+        else:
+            from app.services.llm_service import LLMService
+            self.llm_service = LLMService()
+
 
     @staticmethod
     def validate_city_input(city: str) -> str:
@@ -231,3 +244,84 @@ class StatisticsService:
             coverage_percent=coverage_percent,
             message=None,
         )
+
+    def get_weather_summary(
+        self,
+        city: str,
+        period: Union[StatisticsPeriod, str],
+        reference_date: Optional[datetime] = None,
+    ) -> WeatherSummaryResponse:
+        """Calculate deterministic statistics and summarize with Groq LLM.
+        
+        Rules:
+        - If coverage is below threshold (status='insufficient_data'), LLM is NEVER called.
+        - If LLM fails or times out, statistics are preserved and returned with status='partial_success'.
+        """
+        stats = self.calculate_average_weather(
+            city=city,
+            period=period,
+            reference_date=reference_date,
+        )
+
+        if stats.status == "insufficient_data":
+            logger.info("Insufficient data for '%s' (%s); skipping LLM summarization.", stats.city, stats.period)
+            return WeatherSummaryResponse(
+                status="insufficient_data",
+                city=stats.city,
+                period=stats.period,
+                statistics=None,
+                summary=None,
+                message=f"Not enough historical weather data is available to calculate a reliable {stats.period} average yet.",
+                coverage_percent=stats.coverage_percent,
+                available_from=stats.available_from,
+                available_to=stats.available_to,
+            )
+
+        metrics = WeatherMetrics(
+            start_date=stats.start_date,
+            end_date=stats.end_date,
+            average_temperature=stats.average_temperature,
+            minimum_temperature=stats.minimum_temperature,
+            maximum_temperature=stats.maximum_temperature,
+            average_feels_like_temperature=stats.average_feels_like_temperature,
+            average_humidity=stats.average_humidity,
+            average_wind_speed=stats.average_wind_speed,
+            total_precipitation=stats.total_precipitation,
+            observation_count=stats.observation_count,
+            coverage_percent=stats.coverage_percent,
+        )
+
+        stats_dict = metrics.model_dump()
+        summary_text = None
+        try:
+            summary_text = self.llm_service.generate_weather_summary(
+                city=stats.city,
+                period=stats.period,
+                statistics=stats_dict,
+            )
+        except Exception as exc:
+            logger.warning("LLM summarization failed for '%s' (%s): %s", stats.city, stats.period, exc)
+            summary_text = None
+
+        if summary_text:
+            return WeatherSummaryResponse(
+                status="success",
+                city=stats.city,
+                period=stats.period,
+                statistics=metrics,
+                summary=summary_text,
+                message=None,
+                coverage_percent=stats.coverage_percent,
+            )
+
+        # Graceful fallback: return calculated statistics without summary
+        return WeatherSummaryResponse(
+            status="partial_success",
+            city=stats.city,
+            period=stats.period,
+            statistics=metrics,
+            summary=None,
+            message="Weather statistics are available, but the summary could not be generated right now.",
+            coverage_percent=stats.coverage_percent,
+        )
+

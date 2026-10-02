@@ -11,9 +11,11 @@ from app.schemas.weather_schema import (
     ForecastResponse,
     StatisticsPeriod,
     WeatherErrorResponse,
+    WeatherMetrics,
     WeatherResponse,
     WeatherStatisticsRequest,
     WeatherStatisticsResponse,
+    WeatherSummaryResponse,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "StatisticsPeriod",
     "WeatherStatisticsRequest",
     "WeatherStatisticsResponse",
+    "WeatherMetrics",
+    "WeatherSummaryResponse",
 ]

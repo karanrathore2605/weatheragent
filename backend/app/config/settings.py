@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # Statistics configuration
     min_statistics_coverage: float = 70.0
 
+    # LLM (Groq) configuration
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    llm_timeout_seconds: float = 15.0
+    llm_temperature: float = 0.2
+
     @field_validator("cors_origins", mode="after")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:

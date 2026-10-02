@@ -5,16 +5,26 @@ Architecture Rule:
 - Clients encapsulate low-level protocol and authentication details.
 """
 
+from app.clients.groq_client import (
+    BaseLLMClient,
+    GroqClient,
+    LLMAuthenticationError,
+    LLMClientError,
+    LLMEmptyResponseError,
+    LLMRateLimitError,
+    LLMServiceUnavailableError,
+    LLMTimeoutError,
+)
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
-    GoogleWeatherClient,
-    WeatherClientError,
     CityNotFoundError,
+    GoogleWeatherClient,
     WeatherAuthenticationError,
+    WeatherClientError,
     WeatherRateLimitError,
-    WeatherTimeoutError,
-    WeatherServiceUnavailableError,
     WeatherResponseParsingError,
+    WeatherServiceUnavailableError,
+    WeatherTimeoutError,
 )
 
 __all__ = [
@@ -27,4 +37,12 @@ __all__ = [
     "WeatherTimeoutError",
     "WeatherServiceUnavailableError",
     "WeatherResponseParsingError",
+    "BaseLLMClient",
+    "GroqClient",
+    "LLMClientError",
+    "LLMAuthenticationError",
+    "LLMTimeoutError",
+    "LLMRateLimitError",
+    "LLMServiceUnavailableError",
+    "LLMEmptyResponseError",
 ]

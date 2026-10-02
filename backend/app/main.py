@@ -74,7 +74,9 @@ def create_application() -> FastAPI:
             "weather": "/api/v1/weather/current",
             "forecast": "/api/v1/weather/forecast",
             "statistics": "/api/v1/weather/statistics",
+            "summary": "/api/v1/weather/statistics/summary",
         }
+
 
     return app
 

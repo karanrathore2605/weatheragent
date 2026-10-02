@@ -7,7 +7,8 @@ Architecture Rule:
 """
 
 from app.services.health_service import HealthService
+from app.services.llm_service import LLMService
 from app.services.statistics_service import StatisticsService
 from app.services.weather_service import WeatherService
 
-__all__ = ["HealthService", "StatisticsService", "WeatherService"]
+__all__ = ["HealthService", "LLMService", "StatisticsService", "WeatherService"]

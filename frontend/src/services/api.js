@@ -108,11 +108,26 @@ export async function getWeatherStatistics(city, period = "week") {
   );
 }
 
+/**
+ * Fetch calculated weather statistics and AI summary for a city over a defined period.
+ * Calls GET /api/v1/weather/statistics/summary?city=...&period=...
+ */
+export async function getWeatherSummary(city, period = "week") {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  return request(
+    `/api/v1/weather/statistics/summary?city=${encodeURIComponent(city.trim())}&period=${encodeURIComponent(period)}`
+  );
+}
+
 export default {
   getHealthStatus,
   getRootInfo,
   getCurrentWeather,
   getWeatherForecast,
   getWeatherStatistics,
+  getWeatherSummary,
 };
+
 

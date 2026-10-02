@@ -105,6 +105,7 @@ Agent   ──►  Tool     ──►  Service  ──►  Client
    - Current Weather: [http://localhost:8000/api/v1/weather/current?city=Indore](http://localhost:8000/api/v1/weather/current?city=Indore)
    - 5-Day Forecast: [http://localhost:8000/api/v1/weather/forecast?city=Indore&days=5](http://localhost:8000/api/v1/weather/forecast?city=Indore&days=5)
    - Weather Statistics: [http://localhost:8000/api/v1/weather/statistics?city=Indore&period=week](http://localhost:8000/api/v1/weather/statistics?city=Indore&period=week)
+   - Weather Summary (LLM): [http://localhost:8000/api/v1/weather/statistics/summary?city=Indore&period=week](http://localhost:8000/api/v1/weather/statistics/summary?city=Indore&period=week)
    - Interactive OpenAPI Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 7. Run Backend Tests:
@@ -308,6 +309,185 @@ DATABASE_URL="sqlite:///./weatheragent.db"
 
 ---
 
+## Groq LLM Weather Summarization System
+
+A production-grade, natural-language summarization layer powered by **Groq Cloud LLMs** (`groq` Python SDK) built on top of deterministic meteorological statistics.
+
+### Architectural Flow
+
+```
+                      USER
+                        ↓
+                    FRONTEND
+                        ↓
+               STATISTICS API ROUTER
+                        ↓
+               STATISTICS SERVICE
+                        ↓
+                    DATABASE
+                        ↓
+            DETERMINISTIC CALCULATION
+                        ↓
+            STRUCTURED WEATHER METRICS
+                        ↓
+                   LLM SERVICE
+                        ↓
+                   GROQ CLIENT
+                        ↓
+             GROQ MODEL (e.g. LLaMA 3.3)
+                        ↓
+             NATURAL LANGUAGE SUMMARY
+                        ↓
+                    FRONTEND
+                        ↓
+                      USER
+```
+
+### Strict Separation of Responsibilities
+
+1. **Deterministic Backend Math**:
+   - The LLM **NEVER** computes mathematical metrics (averages, minimums, maximums, totals, observation counts, or coverage percentages).
+   - The backend `StatisticsService` deterministically queries the database and computes statistical values in Python.
+2. **Groq Language Generation**:
+   - Groq is strictly responsible for synthesizing the already-calculated, structured metrics into concise, friendly, natural-language prose.
+   - Structured JSON is fed into the LLM — no loose string concatenations.
+3. **Controlled System Prompting & Prompt Injection Safety**:
+   - System prompts are fixed and non-overridable.
+   - User city inputs are sanitized to alphanumeric text, preventing prompt injection attacks.
+4. **Insufficient Data Protection**:
+   - If historical observations fall below the minimum coverage threshold (`status = "insufficient_data"`), **Groq is NOT called**.
+   - A friendly explanatory message is returned directly without wasting LLM tokens or summarizing incomplete datasets.
+5. **Fault-Tolerant Fallback (`partial_success`)**:
+   - If Groq encounters an API error, invalid API key, network timeout, or rate limiting, the system catches the failure gracefully.
+   - The endpoint returns `status = "partial_success"` with the complete, valid deterministic statistics intact, along with a helpful notification. LLM outages never break core weather capabilities.
+
+### Groq Configuration
+
+Set the following environment variables in `backend/.env`:
+
+```env
+GROQ_API_KEY="gsk_your_groq_api_key_here"
+GROQ_MODEL="llama-3.3-70b-versatile"
+LLM_TIMEOUT_SECONDS=15.0
+LLM_TEMPERATURE=0.2
+```
+
+> **Security Note**: Never commit `.env` or hardcode API keys in source code. Do not expose `GROQ_API_KEY` to the React frontend.
+
+### API Specification
+
+#### Endpoint
+
+```http
+GET /api/v1/weather/statistics/summary?city={city}&period={week|month|year}
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `city` | string | Yes | — | Target city name (e.g. `Indore`, `London`) |
+| `period` | string | No | `week` | Statistical horizon: `week`, `month`, or `year` |
+
+#### Example 1: Full Success (`status = "success"`)
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/weather/statistics/summary?city=Indore&period=week"
+```
+
+```json
+{
+  "status": "success",
+  "city": "Indore",
+  "period": "week",
+  "statistics": {
+    "city": "Indore",
+    "period": "week",
+    "start_date": "2026-09-28",
+    "end_date": "2026-10-04",
+    "average_temperature": 28.4,
+    "minimum_temperature": 23.1,
+    "maximum_temperature": 33.7,
+    "average_feels_like_temperature": 30.1,
+    "average_humidity": 61.2,
+    "average_wind_speed": 11.8,
+    "total_precipitation": 12.4,
+    "observation_count": 135,
+    "coverage_percent": 80.4
+  },
+  "summary": "This week in Indore, temperatures averaged 28.4°C with a range between 23.1°C and 33.7°C. Humidity averaged around 61%, and total precipitation reached 12.4 mm.",
+  "message": null
+}
+```
+
+#### Example 2: Partial Success / Groq Fallback (`status = "partial_success"`)
+
+```json
+{
+  "status": "partial_success",
+  "city": "Indore",
+  "period": "week",
+  "statistics": {
+    "city": "Indore",
+    "period": "week",
+    "start_date": "2026-09-28",
+    "end_date": "2026-10-04",
+    "average_temperature": 28.4,
+    "minimum_temperature": 23.1,
+    "maximum_temperature": 33.7,
+    "average_feels_like_temperature": 30.1,
+    "average_humidity": 61.2,
+    "average_wind_speed": 11.8,
+    "total_precipitation": 12.4,
+    "observation_count": 135,
+    "coverage_percent": 80.4
+  },
+  "summary": null,
+  "message": "Weather statistics are available, but the AI summary could not be generated right now."
+}
+```
+
+#### Example 3: Insufficient Data (`status = "insufficient_data"`)
+
+```json
+{
+  "status": "insufficient_data",
+  "city": "Indore",
+  "period": "year",
+  "statistics": null,
+  "summary": null,
+  "message": "Not enough historical weather data is available to calculate a reliable yearly average yet."
+}
+```
+
+### Frontend User-Triggered Experience
+
+- **User-Triggered Execution**: Historical statistics and LLM summaries are **not** requested automatically when the page loads.
+- **Workflow**:
+  1. The user selects a **City** and chooses a **Period** (`Week`, `Month`, or `Year`).
+  2. The user clicks **`[ Calculate Average ]`**.
+  3. A loading indicator displays: `"Analyzing weather data..."` with duplicate-click protection.
+  4. The result card displays the natural-language summary alongside structured metric cards (Average Temperature, Range, Humidity, Precipitation, Wind Speed, and Data Coverage).
+
+---
+
+## Testing
+
+Backend test suites use `pytest` with mocked external APIs (no real Google Weather or Groq API calls in tests):
+
+```bash
+# Run all unit and integration tests
+pytest
+
+# Run Groq client and LLM service unit tests
+pytest tests/weather/test_groq_llm_service.py
+
+# Run end-to-end Weather Summary integration tests
+pytest tests/weather/test_weather_summary_integration.py
+```
+
+---
+
 ## Environment Variables Reference
 
 | Variable | Default | Purpose |
@@ -319,4 +499,9 @@ DATABASE_URL="sqlite:///./weatheragent.db"
 | `GOOGLE_WEATHER_API_KEY` | `""` | Google Maps / Weather API Key |
 | `DATABASE_URL` | `sqlite:///./weatheragent.db` | SQLAlchemy database connection URI |
 | `MIN_STATISTICS_COVERAGE` | `70.0` | Minimum observation coverage threshold (%) |
+| `GROQ_API_KEY` | `""` | Groq Cloud API Authentication Key |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq LLM model name (configurable) |
+| `LLM_TIMEOUT_SECONDS` | `15.0` | Request timeout for Groq API calls |
+| `LLM_TEMPERATURE` | `0.2` | Sampling temperature for factual summaries |
+
 
