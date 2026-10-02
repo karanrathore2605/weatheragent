@@ -1,13 +1,20 @@
-"""Unit tests for StatisticsService covering all required business rules and periods."""
+"""Unit tests for StatisticsService and AverageTemperatureCalculator with AccuWeather."""
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 import pytest
 
-from app.clients.weather_client import CityNotFoundError, WeatherServiceUnavailableError
+from app.clients.weather_client import (
+    CityNotFoundError,
+    WeatherAuthenticationError,
+    WeatherRateLimitError,
+    WeatherServiceUnavailableError,
+    WeatherTimeoutError,
+)
 from app.models.weather_observation import WeatherObservation
 from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import StatisticsPeriod
+from app.services.average_temperature_calculator import AverageTemperatureCalculator
 from app.services.historical_weather_service import HistoricalWeatherService
 from app.services.statistics_service import StatisticsService
 
@@ -25,14 +32,14 @@ def mock_repo() -> MagicMock:
 
 @pytest.fixture
 def mock_historical_service() -> MagicMock:
-    """Fixture providing a mock HistoricalWeatherService (mocking Google Weather API)."""
+    """Fixture providing a mock HistoricalWeatherService (AccuWeather)."""
     service = MagicMock(spec=HistoricalWeatherService)
     return service
 
 
 @pytest.fixture
 def service(mock_historical_service: MagicMock, mock_repo: MagicMock) -> StatisticsService:
-    """Fixture providing StatisticsService with mocked Google historical service."""
+    """Fixture providing StatisticsService with mocked AccuWeather historical service."""
     return StatisticsService(
         historical_service=mock_historical_service,
         repository=mock_repo,
@@ -63,16 +70,45 @@ def create_observation(
         wind_speed=wind,
         pressure=1012.0,
         weather_condition="Clear",
-        source="google",
+        source="accuweather",
     )
     return obs
 
 
 # ---------------------------------------------------------------------------
-# Requirement 11: Invalid city validation
+# AverageTemperatureCalculator tests
 # ---------------------------------------------------------------------------
+
+def test_average_temperature_calculator() -> None:
+    """Test AverageTemperatureCalculator standalone calculations."""
+    calc = AverageTemperatureCalculator()
+
+    # Empty list
+    assert calc.calculate_average_temperature([]) is None
+
+    # Valid observations
+    obs_list = [
+        create_observation(temp=30.0),
+        create_observation(temp=32.0),
+        create_observation(temp=31.0),
+    ]
+    assert calc.calculate_average_temperature(obs_list) == 31.0
+
+    # With None / null temperatures ignored
+    dict_obs = [
+        {"temperature": 25.0},
+        {"temperature": None},
+        {"temperature": 35.0},
+    ]
+    assert calc.calculate_average_temperature(dict_obs) == 30.0
+
+
+# ---------------------------------------------------------------------------
+# City validation
+# ---------------------------------------------------------------------------
+
 def test_validate_city_input(service: StatisticsService) -> None:
-    """Test city name validation in StatisticsService (Requirement 11)."""
+    """Test city name validation in StatisticsService."""
     assert service.validate_city_input("Indore") == "Indore"
     assert service.validate_city_input("  new york  ") == "New York"
 
@@ -90,17 +126,17 @@ def test_validate_city_input(service: StatisticsService) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Requirement 8: Year option is removed
+# Year option removed
 # ---------------------------------------------------------------------------
+
 def test_year_option_removed(service: StatisticsService) -> None:
-    """Test that 'year' period option is strictly rejected (Requirement 8)."""
+    """Test that 'year' period option is strictly rejected."""
     with pytest.raises(ValueError, match="The 'year' period option has been removed"):
         service.parse_period("year")
 
     with pytest.raises(ValueError, match="The 'year' period option has been removed"):
         service.parse_period("YEAR")
 
-    # Also verify unsupported periods
     with pytest.raises(ValueError, match="Supported periods: week, month"):
         service.parse_period("century")
 
@@ -113,39 +149,49 @@ def test_parse_valid_periods(service: StatisticsService) -> None:
     assert service.parse_period("MONTH") == StatisticsPeriod.MONTH
 
 
-def test_validate_period_durations(service: StatisticsService) -> None:
-    """Test duration validation for week and month."""
-    # Week supports 1, 2, 3
-    assert service.validate_period_value(StatisticsPeriod.WEEK, 1) == 1
-    assert service.validate_period_value(StatisticsPeriod.WEEK, 2) == 2
-    assert service.validate_period_value(StatisticsPeriod.WEEK, 3) == 3
-    with pytest.raises(ValueError, match="Supported durations for week: 1, 2, or 3"):
-        service.validate_period_value(StatisticsPeriod.WEEK, 4)
+# ---------------------------------------------------------------------------
+# Duration validation: Week (1-4) & Month (1-12)
+# ---------------------------------------------------------------------------
 
-    # Month supports 1, 2, 3, 4
-    assert service.validate_period_value(StatisticsPeriod.MONTH, 1) == 1
-    assert service.validate_period_value(StatisticsPeriod.MONTH, 2) == 2
-    assert service.validate_period_value(StatisticsPeriod.MONTH, 3) == 3
-    assert service.validate_period_value(StatisticsPeriod.MONTH, 4) == 4
-    with pytest.raises(ValueError, match="Supported durations for month: 1, 2, 3, or 4"):
-        service.validate_period_value(StatisticsPeriod.MONTH, 5)
+def test_validate_week_durations(service: StatisticsService) -> None:
+    """Test duration validation for week: 1, 2, 3, 4."""
+    for d in [1, 2, 3, 4]:
+        assert service.validate_period_value(StatisticsPeriod.WEEK, d) == d
+
+    with pytest.raises(ValueError, match="Supported durations for week"):
+        service.validate_period_value(StatisticsPeriod.WEEK, 0)
+
+    with pytest.raises(ValueError, match="Supported durations for week"):
+        service.validate_period_value(StatisticsPeriod.WEEK, 5)
+
+
+def test_validate_month_durations(service: StatisticsService) -> None:
+    """Test duration validation for month: 1 through 12."""
+    for d in range(1, 13):
+        assert service.validate_period_value(StatisticsPeriod.MONTH, d) == d
+
+    with pytest.raises(ValueError, match="Supported durations for month"):
+        service.validate_period_value(StatisticsPeriod.MONTH, 0)
+
+    with pytest.raises(ValueError, match="Supported durations for month"):
+        service.validate_period_value(StatisticsPeriod.MONTH, 13)
 
 
 # ---------------------------------------------------------------------------
-# Requirements 1, 2, 3: Week requests (1-week, 2-week, 3-week)
+# Week requests: 1, 2, 3, 4 weeks
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("weeks,expected_days", [(1, 7), (2, 14), (3, 21)])
+
+@pytest.mark.parametrize("weeks,expected_days", [(1, 7), (2, 14), (3, 21), (4, 28)])
 def test_week_requests(
     service: StatisticsService,
     mock_historical_service: MagicMock,
     weeks: int,
     expected_days: int,
 ) -> None:
-    """Test 1-week, 2-week, and 3-week requests (Requirements 1, 2, 3)."""
+    """Test 1, 2, 3, and 4 week calculations."""
     ref = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone.utc)
     expected_hours = expected_days * 24
 
-    # Provide observations for 80% coverage
     obs_count = int(expected_hours * 0.8)
     base_time = ref - timedelta(days=expected_days)
     observations = [
@@ -154,33 +200,32 @@ def test_week_requests(
     ]
     mock_historical_service.fetch_and_get_observations.return_value = (
         observations,
-        {"formatted_address": "Indore, Madhya Pradesh, India"},
+        {"city": "Indore", "formatted_address": "Indore, Madhya Pradesh, India"},
     )
 
     res = service.calculate_average_weather("Indore", "week", period_value=weeks, reference_date=ref)
 
     assert res.status == "SUCCESS"
     assert res.city == "Indore"
+    assert res.provider == "accuweather"
     assert res.period_type == "week"
-    assert res.period_value == weeks
+    assert res.duration == weeks
+    assert res.data_coverage["complete"] is True
+    assert res.average_temperature_celsius is not None
     assert res.coverage.complete is True
-    assert res.statistics is not None
-    assert res.statistics.average_temperature is not None
-    assert res.statistics.minimum_temperature == 20.0
-    assert res.statistics.maximum_temperature == 29.0
-    assert res.average_temperature == res.statistics.average_temperature
 
 
 # ---------------------------------------------------------------------------
-# Requirements 4, 5, 6, 7: Month requests (1-month, 2-month, 3-month, 4-month)
+# Month requests: 1 through 12 months
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("months", [1, 2, 3, 4])
+
+@pytest.mark.parametrize("months", list(range(1, 13)))
 def test_month_requests(
     service: StatisticsService,
     mock_historical_service: MagicMock,
     months: int,
 ) -> None:
-    """Test 1-month, 2-month, 3-month, and 4-month requests (Requirements 4, 5, 6, 7)."""
+    """Test 1 through 12 month calculations."""
     ref = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone.utc)
     start_date, end_date, expected_obs = service.get_date_range("month", period_value=months, reference_date=ref)
 
@@ -191,93 +236,110 @@ def test_month_requests(
     ]
     mock_historical_service.fetch_and_get_observations.return_value = (
         observations,
-        {"formatted_address": "Indore, Madhya Pradesh, India"},
+        {"city": "Indore", "formatted_address": "Indore, Madhya Pradesh, India"},
     )
 
     res = service.calculate_average_weather("Indore", "month", period_value=months, reference_date=ref)
 
     assert res.status == "SUCCESS"
     assert res.city == "Indore"
+    assert res.provider == "accuweather"
     assert res.period_type == "month"
-    assert res.period_value == months
-    assert res.coverage.complete is True
-    assert res.statistics is not None
-    assert res.statistics.average_temperature is not None
+    assert res.duration == months
+    assert res.data_coverage["complete"] is True
+    assert res.average_temperature_celsius is not None
 
 
 # ---------------------------------------------------------------------------
-# Requirement 9: Incomplete historical coverage
+# Incomplete historical coverage
 # ---------------------------------------------------------------------------
+
 def test_incomplete_historical_coverage(
     service: StatisticsService,
     mock_historical_service: MagicMock,
 ) -> None:
-    """Test that incomplete coverage returns structured INSUFFICIENT_HISTORICAL_DATA (Requirement 9)."""
+    """Test incomplete AccuWeather coverage returns structured INSUFFICIENT_HISTORICAL_DATA."""
     ref = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone.utc)
-    # Expected for 1 week is 168 hours. Only 24 hours available (~14.3% coverage < 70%).
+    # Expected for 1 week is 168 hours. Only 24 hours available (~14.3% < 70%).
     observations = [
         create_observation(dt=ref - timedelta(hours=i), temp=25.0)
         for i in range(24)
     ]
     mock_historical_service.fetch_and_get_observations.return_value = (
         observations,
-        {"formatted_address": "Indore, Madhya Pradesh, India"},
+        {"city": "Indore", "formatted_address": "Indore, Madhya Pradesh, India"},
     )
 
     res = service.calculate_average_weather("Indore", "week", period_value=1, reference_date=ref)
 
     assert res.status == "INSUFFICIENT_HISTORICAL_DATA"
     assert res.city == "Indore"
+    assert res.provider == "accuweather"
+    assert res.data_coverage["complete"] is False
     assert res.coverage.complete is False
-    assert res.statistics is None
-    assert res.average_temperature is None
-    assert "Not enough historical weather data" in res.message or "not enough" in res.message.lower()
+    assert res.average_temperature_celsius is None
+    assert "Historical weather data is not available" in res.message
 
 
 # ---------------------------------------------------------------------------
-# Requirement 10: Google API failure
+# AccuWeather API failure propagation
 # ---------------------------------------------------------------------------
-def test_google_api_failure_propagates(
+
+def test_accuweather_api_failure_propagates(
     service: StatisticsService,
     mock_historical_service: MagicMock,
 ) -> None:
-    """Test that Google API failure raises proper exception (Requirement 10)."""
+    """Test that AccuWeather API failure raises proper exception."""
     mock_historical_service.fetch_and_get_observations.side_effect = WeatherServiceUnavailableError(
-        "Weather service provider temporarily unavailable."
+        "AccuWeather service is temporarily unavailable."
     )
 
     with pytest.raises(WeatherServiceUnavailableError, match="temporarily unavailable"):
         service.calculate_average_weather("Indore", "week", period_value=1)
 
 
+def test_accuweather_auth_failure_propagates(
+    service: StatisticsService,
+    mock_historical_service: MagicMock,
+) -> None:
+    """Test that AccuWeather 401/403 auth error propagates."""
+    mock_historical_service.fetch_and_get_observations.side_effect = WeatherAuthenticationError(
+        "AccuWeather service authentication failed."
+    )
+
+    with pytest.raises(WeatherAuthenticationError, match="authentication failed"):
+        service.calculate_average_weather("Indore", "week", period_value=1)
+
+
 # ---------------------------------------------------------------------------
-# Requirement 12: No fake data is generated
+# No fake data is generated
 # ---------------------------------------------------------------------------
+
 def test_no_fake_data_is_generated_on_empty(
     service: StatisticsService,
     mock_historical_service: MagicMock,
 ) -> None:
-    """Test that when 0 observations are returned, no fake numbers are fabricated (Requirement 12)."""
+    """Test that when 0 observations are returned, no fake numbers are fabricated."""
     mock_historical_service.fetch_and_get_observations.return_value = (
         [],
-        {"formatted_address": "Indore, Madhya Pradesh, India"},
+        {"city": "Indore", "formatted_address": "Indore, Madhya Pradesh, India"},
     )
 
-    res = service.calculate_average_weather("Indore", "month", period_value=4)
+    res = service.calculate_average_weather("Indore", "month", period_value=12)
 
     assert res.status == "INSUFFICIENT_HISTORICAL_DATA"
+    assert res.provider == "accuweather"
+    assert res.data_coverage["complete"] is False
     assert res.coverage.complete is False
+    assert res.average_temperature_celsius is None
     assert res.statistics is None
-    assert res.average_temperature is None
-    assert res.minimum_temperature is None
-    assert res.maximum_temperature is None
 
 
 def test_calculations_ignore_null_values_without_fabrication(
     service: StatisticsService,
     mock_historical_service: MagicMock,
 ) -> None:
-    """Test deterministic calculator strictly averages real values and ignores nulls (Requirement 12)."""
+    """Test calculator strictly averages real values and ignores nulls."""
     ref = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone.utc)
     base_time = ref - timedelta(days=7)
     observations = []
@@ -306,16 +368,12 @@ def test_calculations_ignore_null_values_without_fabrication(
 
     mock_historical_service.fetch_and_get_observations.return_value = (
         observations,
-        {"formatted_address": "Indore, Madhya Pradesh, India"},
+        {"city": "Indore", "formatted_address": "Indore, Madhya Pradesh, India"},
     )
 
     res = service.calculate_average_weather("Indore", "week", period_value=1, reference_date=ref)
 
     assert res.status == "SUCCESS"
-    assert res.statistics.average_temperature == 25.0
-    assert res.statistics.minimum_temperature == 20.0
-    assert res.statistics.maximum_temperature == 30.0
-    assert res.statistics.average_feels_like_temperature == 32.0
-    assert res.statistics.average_humidity == 80.0
-    assert res.statistics.average_wind_speed == 14.0
-    assert res.statistics.total_precipitation == 130.0  # 65 * 2.0
+    assert res.provider == "accuweather"
+    assert res.average_temperature_celsius == 25.0
+    assert res.data_coverage["complete"] is True

@@ -5,6 +5,7 @@ Architecture Rule:
 - Clients encapsulate low-level protocol and authentication details.
 """
 
+from app.clients.accuweather_client import AccuWeatherClient
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
     GoogleWeatherClient,
@@ -18,6 +19,7 @@ from app.clients.weather_client import (
 )
 
 __all__ = [
+    "AccuWeatherClient",
     "GoogleWeatherClient",
     "OpenMeteoClient",
     "WeatherClientError",

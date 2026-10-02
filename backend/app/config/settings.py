@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     weather_api_base_url: str = "https://weather.googleapis.com/v1"
     google_geocoding_base_url: str = "https://maps.googleapis.com/maps/api/geocode/json"
 
+    # AccuWeather API configuration
+    accuweather_api_key: str = ""
+    accuweather_base_url: str = "http://dataservice.accuweather.com"
+
     # Database configuration
     database_url: str = "sqlite:///./weatheragent.db"
 

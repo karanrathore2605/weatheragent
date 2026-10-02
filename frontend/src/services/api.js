@@ -97,14 +97,14 @@ export async function getWeatherForecast(city, days = 5) {
 
 /**
  * Fetch meteorological statistics for a city over a defined period (week or month) and duration.
- * Calls GET /api/v1/weather/statistics?city=...&period_type=...&period_value=...
+ * Calls GET /api/v1/weather/statistics?city=...&period_type=...&duration=...
  */
-export async function getWeatherStatistics(city, periodType = "week", periodValue = 1) {
+export async function getWeatherStatistics(city, periodType = "week", duration = 1) {
   if (!city || !city.trim()) {
     throw new Error("Please enter a city.");
   }
   return request(
-    `/api/v1/weather/statistics?city=${encodeURIComponent(city.trim())}&period_type=${encodeURIComponent(periodType)}&period_value=${encodeURIComponent(periodValue)}`
+    `/api/v1/weather/statistics?city=${encodeURIComponent(city.trim())}&period_type=${encodeURIComponent(periodType)}&duration=${encodeURIComponent(duration)}&period_value=${encodeURIComponent(duration)}`
   );
 }
 

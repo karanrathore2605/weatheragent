@@ -1,15 +1,11 @@
 import React, { useState } from "react";
 import { getWeatherStatistics } from "../services/api";
 
-const PERIODS = [
-  { key: "week", label: "Week" },
-  { key: "month", label: "Month" },
-];
-
 const WEEK_DURATIONS = [
   { value: 1, label: "1 Week" },
   { value: 2, label: "2 Weeks" },
   { value: 3, label: "3 Weeks" },
+  { value: 4, label: "4 Weeks" },
 ];
 
 const MONTH_DURATIONS = [
@@ -17,6 +13,14 @@ const MONTH_DURATIONS = [
   { value: 2, label: "2 Months" },
   { value: 3, label: "3 Months" },
   { value: 4, label: "4 Months" },
+  { value: 5, label: "5 Months" },
+  { value: 6, label: "6 Months" },
+  { value: 7, label: "7 Months" },
+  { value: 8, label: "8 Months" },
+  { value: 9, label: "9 Months" },
+  { value: 10, label: "10 Months" },
+  { value: 11, label: "11 Months" },
+  { value: 12, label: "12 Months" },
 ];
 
 export function WeatherStatistics({ city }) {
@@ -25,13 +29,11 @@ export function WeatherStatistics({ city }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [lastCalculatedParams, setLastCalculatedParams] = useState(null);
+  const [lastCalculated, setLastCalculated] = useState(null);
 
   const handlePeriodChange = (newPeriod) => {
-    if (newPeriod !== period) {
-      setPeriod(newPeriod);
-      setDuration(1); // Reset duration to 1 when period changes
-    }
+    setPeriod(newPeriod);
+    setDuration(1); // Reset duration on period change
   };
 
   const handleCalculateAverage = async () => {
@@ -43,7 +45,7 @@ export function WeatherStatistics({ city }) {
     try {
       const data = await getWeatherStatistics(city.trim(), period, duration);
       setStats(data);
-      setLastCalculatedParams({
+      setLastCalculated({
         city: city.trim(),
         period,
         duration,
@@ -58,22 +60,29 @@ export function WeatherStatistics({ city }) {
 
   const currentDurations = period === "week" ? WEEK_DURATIONS : MONTH_DURATIONS;
 
-  const durationLabel =
-    currentDurations.find((d) => d.value === duration)?.label ||
-    `${duration} ${period === "week" ? (duration === 1 ? "Week" : "Weeks") : (duration === 1 ? "Month" : "Months")}`;
+  const getPeriodDisplayLabel = (targetPeriod, targetDuration) => {
+    const isWeek = targetPeriod === "week";
+    if (targetDuration === 1) {
+      return isWeek ? "Previous 1 Week" : "Previous 1 Month";
+    }
+    return isWeek
+      ? `Previous ${targetDuration} Weeks`
+      : `Previous ${targetDuration} Months`;
+  };
 
   const isInsufficient =
     stats &&
     (stats.status === "INSUFFICIENT_HISTORICAL_DATA" ||
       stats.status === "insufficient_data" ||
+      stats.data_coverage?.complete === false ||
       stats.coverage?.complete === false);
 
-  const isSuccess =
-    stats &&
-    !isInsufficient &&
-    (stats.status === "SUCCESS" || stats.status === "success" || Boolean(stats.statistics));
+  const isSuccess = stats && !isInsufficient;
 
-  const statsData = stats?.statistics || stats;
+  const avgTemp =
+    stats?.average_temperature_celsius ??
+    stats?.statistics?.average_temperature ??
+    stats?.average_temperature;
 
   return (
     <section className="statistics-section" aria-label="Weather Statistics">
@@ -82,46 +91,49 @@ export function WeatherStatistics({ city }) {
           <span className="current-badge">Historical Average</span>
           <h3 className="statistics-title">Weather Statistics</h3>
           <p className="statistics-subtitle">
-            Deterministic meteorological analysis for <strong className="city-highlight">{city}</strong>
+            Historical temperature analysis for <strong className="city-highlight">{city}</strong>
           </p>
         </div>
       </div>
 
-      {/* Control Panel: Analysis Period, Duration Selector, and Calculate Button */}
+      {/* Control Panel with Dropdowns and Calculate Button */}
       <div className="stats-controls-panel">
         <div className="control-group">
-          <label className="control-label">Analysis Period</label>
-          <div className="period-tabs" role="tablist" aria-label="Analysis Period">
-            {PERIODS.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                role="tab"
-                id={`period-tab-${item.key}`}
-                aria-selected={period === item.key}
-                className={`period-tab-btn ${period === item.key ? "active" : ""}`}
-                onClick={() => handlePeriodChange(item.key)}
-              >
-                {item.label}
-              </button>
-            ))}
+          <label htmlFor="analysis-period-select" className="control-label">
+            ANALYSIS PERIOD
+          </label>
+          <div className="select-wrapper">
+            <select
+              id="analysis-period-select"
+              className="dropdown-select"
+              value={period}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+            >
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+            <span className="select-arrow" aria-hidden="true">▼</span>
           </div>
         </div>
 
         <div className="control-group">
-          <label className="control-label">Duration</label>
-          <div className="duration-selector" role="group" aria-label="Duration Selection">
-            {currentDurations.map((d) => (
-              <button
-                key={d.value}
-                type="button"
-                id={`duration-btn-${period}-${d.value}`}
-                className={`duration-btn ${duration === d.value ? "active" : ""}`}
-                onClick={() => setDuration(d.value)}
-              >
-                {d.label}
-              </button>
-            ))}
+          <label htmlFor="duration-select" className="control-label">
+            DURATION
+          </label>
+          <div className="select-wrapper">
+            <select
+              id="duration-select"
+              className="dropdown-select"
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+            >
+              {currentDurations.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+            <span className="select-arrow" aria-hidden="true">▼</span>
           </div>
         </div>
 
@@ -142,7 +154,7 @@ export function WeatherStatistics({ city }) {
       {loading && (
         <div className="stats-loading" id="stats-loading-indicator">
           <div className="loading-spinner"></div>
-          <span>Calculating weather statistics...</span>
+          <span>Calculating average temperature...</span>
         </div>
       )}
 
@@ -164,27 +176,27 @@ export function WeatherStatistics({ city }) {
         </div>
       )}
 
-      {/* Initial Prompt State (before first calculation) */}
+      {/* Before calculation / Initial state */}
       {!loading && !error && !stats && (
-        <div className="stats-empty-state">
+        <div className="stats-empty-state" id="stats-prompt-state">
           <span className="empty-state-icon">📈</span>
           <p className="empty-state-text">
-            Select an analysis period and duration above, then click <strong>Calculate Average</strong> to view meteorological statistics.
+            Select an analysis period and duration, then click <strong>Calculate Average</strong>.
           </p>
         </div>
       )}
 
-      {/* Insufficient Coverage State */}
+      {/* Insufficient Data State */}
       {!loading && !error && isInsufficient && (
         <div className="insufficient-data-card" id="stats-insufficient-card">
           <div className="insufficient-header">
             <span className="insufficient-icon">📊</span>
             <div>
               <h4 className="insufficient-title">
-                Historical weather data is not available for the complete requested period yet.
+                Historical weather data is not available for the complete requested period.
               </h4>
               <p className="insufficient-desc">
-                Google Weather API provides recent historical observations. Extended period statistics require complete observation coverage to guarantee numerical accuracy without data fabrication.
+                AccuWeather provides recent historical observations. Extended period statistics require complete observation coverage to guarantee numerical accuracy without data fabrication.
               </p>
             </div>
           </div>
@@ -198,127 +210,67 @@ export function WeatherStatistics({ city }) {
             <div className="insufficient-metric">
               <span className="metric-label">Requested Period</span>
               <span className="metric-value">
-                Previous {stats.period_value || duration} {stats.period_type ? (stats.period_type === "week" ? (stats.period_value === 1 ? "Week" : "Weeks") : (stats.period_value === 1 ? "Month" : "Months")) : durationLabel}
+                {getPeriodDisplayLabel(stats.period_type || period, stats.duration || duration)}
               </span>
             </div>
 
             <div className="insufficient-metric">
-              <span className="metric-label">Available Coverage</span>
-              <span className="metric-value coverage-low">
-                {stats.coverage?.available || `${stats.coverage_percent || 0}%`}
-              </span>
+              <span className="metric-label">Provider</span>
+              <span className="metric-value">AccuWeather</span>
             </div>
 
             <div className="insufficient-metric">
               <span className="metric-label">Data Coverage</span>
-              <span className="metric-value">Incomplete</span>
+              <span className="metric-value coverage-low">Incomplete</span>
             </div>
           </div>
 
           <div className="insufficient-footer-note">
-            💡 Observations accumulate directly from Google Weather API as queries are processed for {stats.city || city}.
+            💡 Historical observations originate from AccuWeather.
           </div>
         </div>
       )}
 
-      {/* Success State */}
+      {/* Successful Calculation: Main statistic is Average Temperature */}
       {!loading && !error && isSuccess && (
         <div className="statistics-card-wrapper" id="stats-success-card">
           <div className="stats-meta-bar">
             <span className="stats-window-tag">
-              📍 <strong>{stats.city || city}</strong> &bull; Previous {lastCalculatedParams ? `${lastCalculatedParams.duration} ${lastCalculatedParams.duration === 1 ? (lastCalculatedParams.period === "week" ? "Week" : "Month") : (lastCalculatedParams.period === "week" ? "Weeks" : "Months")}` : durationLabel}
+              📍 <strong>{stats.city || city}</strong> &bull;{" "}
+              {lastCalculated
+                ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
+                : getPeriodDisplayLabel(period, duration)}
               {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
             </span>
             <span className="stats-coverage-tag">
-              ✓ Data Coverage: Complete
+              Source: AccuWeather
             </span>
           </div>
 
-          <div className="stats-metrics-grid">
-            <div className="stat-card">
-              <span className="stat-icon">🌡️</span>
-              <div className="stat-info">
-                <span className="stat-label">Average Temperature</span>
-                <span className="stat-value">
-                  {statsData?.average_temperature != null ? `${statsData.average_temperature}°C` : "N/A"}
+          <div className="average-temp-hero-card">
+            <div className="hero-temp-header">
+              <span className="hero-temp-badge">AccuWeather Historical Analysis</span>
+              <span className="hero-city-name">{stats.city || city}</span>
+              <span className="hero-period-label">
+                {lastCalculated
+                  ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
+                  : getPeriodDisplayLabel(period, duration)}
+              </span>
+            </div>
+
+            <div className="hero-temp-display">
+              <span className="hero-temp-icon" aria-hidden="true">🌡️</span>
+              <div className="hero-temp-details">
+                <span className="hero-temp-title">Average Temperature</span>
+                <span className="hero-temp-value">
+                  {avgTemp != null ? `${avgTemp}°C` : "N/A"}
                 </span>
               </div>
             </div>
 
-            <div className="stat-card">
-              <span className="stat-icon">❄️</span>
-              <div className="stat-info">
-                <span className="stat-label">Minimum Temperature</span>
-                <span className="stat-value">
-                  {statsData?.minimum_temperature != null ? `${statsData.minimum_temperature}°C` : "N/A"}
-                </span>
-              </div>
-            </div>
-
-            <div className="stat-card">
-              <span className="stat-icon">🔥</span>
-              <div className="stat-info">
-                <span className="stat-label">Maximum Temperature</span>
-                <span className="stat-value">
-                  {statsData?.maximum_temperature != null ? `${statsData.maximum_temperature}°C` : "N/A"}
-                </span>
-              </div>
-            </div>
-
-            {statsData?.average_feels_like_temperature != null && (
-              <div className="stat-card">
-                <span className="stat-icon">🧍</span>
-                <div className="stat-info">
-                  <span className="stat-label">Feels Like</span>
-                  <span className="stat-value">{statsData.average_feels_like_temperature}°C</span>
-                </div>
-              </div>
-            )}
-
-            {statsData?.average_humidity != null && (
-              <div className="stat-card">
-                <span className="stat-icon">💧</span>
-                <div className="stat-info">
-                  <span className="stat-label">Average Humidity</span>
-                  <span className="stat-value">{statsData.average_humidity}%</span>
-                </div>
-              </div>
-            )}
-
-            {statsData?.average_wind_speed != null && (
-              <div className="stat-card">
-                <span className="stat-icon">💨</span>
-                <div className="stat-info">
-                  <span className="stat-label">Average Wind Speed</span>
-                  <span className="stat-value">{statsData.average_wind_speed} km/h</span>
-                </div>
-              </div>
-            )}
-
-            {statsData?.total_precipitation != null && (
-              <div className="stat-card">
-                <span className="stat-icon">🌧️</span>
-                <div className="stat-info">
-                  <span className="stat-label">Total Precipitation</span>
-                  <span className="stat-value">{statsData.total_precipitation} mm</span>
-                </div>
-              </div>
-            )}
-
-            <div className="stat-card full-width-stat">
-              <span className="stat-icon">✅</span>
-              <div className="stat-info" style={{ width: "100%" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
-                  <span className="stat-label">Data Coverage</span>
-                  <span className="stat-badge-success">Complete</span>
-                </div>
-                <div className="coverage-bar-track">
-                  <div
-                    className="coverage-bar-fill"
-                    style={{ width: "100%" }}
-                  ></div>
-                </div>
-              </div>
+            <div className="hero-temp-footer">
+              <span className="hero-source-tag">Source: <strong>AccuWeather</strong></span>
+              <span className="hero-status-tag">✓ Coverage: Complete</span>
             </div>
           </div>
         </div>

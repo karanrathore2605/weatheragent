@@ -1,6 +1,6 @@
 """Pydantic schemas for Weather endpoints and domain models."""
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -84,11 +84,16 @@ class WeatherStatisticsRequest(BaseModel):
         description="Aggregation time horizon ('week', 'month')",
         examples=[StatisticsPeriod.WEEK],
     )
-    period_value: int = Field(
+    duration: int = Field(
         default=1,
         ge=1,
-        le=4,
-        description="Period duration value (1, 2, 3 for week; 1, 2, 3, 4 for month)",
+        le=12,
+        description="Period duration value (1-4 for week; 1-12 for month)",
+        examples=[1],
+    )
+    period_value: Optional[int] = Field(
+        default=None,
+        description="Legacy alias for duration",
         examples=[1],
     )
 
@@ -97,19 +102,23 @@ class WeatherStatisticsResponse(BaseModel):
     """Structured response payload for weather statistics."""
 
     city: str = Field(..., description="Target city name", examples=["Indore"])
+    provider: str = Field("accuweather", description="Weather data provider identifier", examples=["accuweather"])
     period_type: str = Field("week", description="Statistical aggregation period ('week' or 'month')", examples=["week"])
-    period_value: int = Field(1, description="Period duration value (1, 2, 3 for week; 1, 2, 3, 4 for month)", examples=[1])
+    duration: int = Field(1, description="Period duration value (1-4 for week; 1-12 for month)", examples=[1])
+    period_value: int = Field(1, description="Period duration value alias", examples=[1])
     start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-09-25"])
     end_date: Optional[str] = Field(None, description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-02"])
-    data_source: str = Field("google_weather_api", description="Weather data source identifier", examples=["google_weather_api"])
+    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[31.8])
+    data_coverage: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"complete": True}, description="Data coverage details")
+    data_source: str = Field("accuweather", description="Weather data source identifier", examples=["accuweather"])
     coverage: CoverageInfo = Field(default_factory=lambda: CoverageInfo(complete=True), description="Coverage assessment details")
     statistics: Optional[StatisticsMetrics] = Field(None, description="Calculated meteorological statistics")
     status: str = Field("SUCCESS", description="Operation status ('SUCCESS' or 'INSUFFICIENT_HISTORICAL_DATA')", examples=["SUCCESS"])
-    message: Optional[str] = Field(None, description="Status or guidance message", examples=["There is not enough historical weather data available for the requested period."])
+    message: Optional[str] = Field(None, description="Status or guidance message", examples=["Historical weather data is not available for the complete requested period."])
 
     # Backward compatibility convenience fields
     period: Optional[str] = Field(None, description="Legacy period alias", examples=["week"])
-    average_temperature: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[32.4])
+    average_temperature: Optional[float] = Field(None, description="Average temperature in Celsius alias", examples=[31.8])
     minimum_temperature: Optional[float] = Field(None, description="Minimum temperature in Celsius", examples=[27.1])
     maximum_temperature: Optional[float] = Field(None, description="Maximum temperature in Celsius", examples=[38.2])
     average_feels_like_temperature: Optional[float] = Field(None, description="Average perceived temperature in Celsius", examples=[34.0])
@@ -120,4 +129,5 @@ class WeatherStatisticsResponse(BaseModel):
     coverage_percent: Optional[float] = Field(None, description="Data coverage percentage for the requested period", examples=[100.0])
     available_from: Optional[str] = Field(None, description="Earliest available observation date if insufficient data", examples=["2026-09-25"])
     available_to: Optional[str] = Field(None, description="Latest available observation date if insufficient data", examples=["2026-10-02"])
+
 
