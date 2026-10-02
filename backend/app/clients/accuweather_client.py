@@ -37,7 +37,10 @@ class AccuWeatherClient:
     ) -> None:
         self.api_key = api_key if api_key is not None else settings.accuweather_api_key
         self.timeout = timeout if timeout is not None else settings.weather_api_timeout
-        self.base_url = (base_url or settings.accuweather_base_url).rstrip("/")
+        raw_base = base_url or settings.accuweather_base_url
+        if raw_base.startswith("http://"):
+            raw_base = "https://" + raw_base[len("http://") :]
+        self.base_url = raw_base.rstrip("/")
         # In-memory location key cache: city_lower -> location dict
         self._location_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -82,7 +85,7 @@ class AccuWeatherClient:
         logger.debug("Searching AccuWeather location key for city: %s", city_clean)
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 response = client.get(url, params=params)
         except httpx.TimeoutException as exc:
             logger.error("AccuWeather location search timed out for city: %s", city_clean)
@@ -174,7 +177,7 @@ class AccuWeatherClient:
         logger.debug("Requesting AccuWeather historical conditions for location_key: %s", location_key)
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
                 response = client.get(url, params=params)
         except httpx.TimeoutException as exc:
             logger.error("AccuWeather historical conditions request timed out")

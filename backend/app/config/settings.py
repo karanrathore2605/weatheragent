@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # AccuWeather API configuration
     accuweather_api_key: str = ""
-    accuweather_base_url: str = "http://dataservice.accuweather.com"
+    accuweather_base_url: str = "https://dataservice.accuweather.com"
 
     # Database configuration
     database_url: str = "sqlite:///./weatheragent.db"
