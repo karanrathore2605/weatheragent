@@ -304,16 +304,12 @@ class StatisticsService:
                 1,
             )
 
-            # Insufficient data condition: 0 observations or below minimum coverage
-            if observation_days == 0 or coverage_percent < self.min_coverage:
+            # Insufficient data condition: 0 observations retrieved
+            if observation_days == 0:
                 logger.warning(
-                    "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
+                    "Insufficient historical data for '%s' (%s): 0 observations retrieved",
                     resolved_city,
                     period_label,
-                    observation_days,
-                    expected_days,
-                    coverage_percent,
-                    self.min_coverage,
                 )
                 return WeatherStatisticsResponse(
                     city=resolved_city,
@@ -434,16 +430,12 @@ class StatisticsService:
             1,
         )
 
-        # Insufficient data condition: 0 observations or below minimum coverage
-        if total_observation_days == 0 or overall_coverage < self.min_coverage:
+        # Insufficient data condition: 0 observations retrieved across all months
+        if total_observation_days == 0:
             logger.warning(
-                "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
+                "Insufficient historical data for '%s' (%s): 0 observations retrieved",
                 resolved_city,
                 period_label,
-                total_observation_days,
-                expected_days,
-                overall_coverage,
-                self.min_coverage,
             )
             return WeatherStatisticsResponse(
                 city=resolved_city,
