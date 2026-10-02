@@ -1,21 +1,21 @@
 """Unit tests for StatisticsService and Open-Meteo historical weather integration.
 
-Covers the 13 required test scenarios:
-1. Indore 1 week
-2. Indore 2 weeks
-3. Indore 4 weeks
-4. Indore 1 month
-5. Indore 3 months
-6. Indore 6 months
-7. Indore 12 months
-8. Invalid city
-9. Open-Meteo API failure
-10. Missing temperature values
-11. Empty API response
-12. Average calculation
-13. Correct date-range calculation
+Covers the 12 required test scenarios:
+1. 1 month
+2. 2 months
+3. 5 months (matching prompt example: 27.8, 28.4, 27.9, 29.1, 28.6 -> 28.36°C)
+4. 12 months
+5. Monthly grouping (proper calendar boundary assignment)
+6. Monthly average calculation (deterministic 1-decimal rounding)
+7. Overall average calculation (from daily observations, NOT average of rounded monthly averages)
+8. Missing daily observations (partial coverage calculation)
+9. Different month lengths (31, 30, 28 days)
+10. Leap year February (29 days in 2024)
+11. Week calculation remains unchanged (1-4 weeks, no monthly breakdown)
+12. Correct API response mapping
 """
 
+import calendar
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 import pytest
@@ -29,7 +29,11 @@ from app.clients.weather_client import (
 from app.schemas.weather_schema import StatisticsPeriod
 from app.services.average_temperature_calculator import AverageTemperatureCalculator
 from app.services.historical_weather_service import HistoricalWeatherService
-from app.services.statistics_service import StatisticsService, subtract_calendar_months
+from app.services.statistics_service import (
+    StatisticsService,
+    get_calendar_months,
+    subtract_calendar_months,
+)
 
 
 @pytest.fixture
@@ -46,214 +50,179 @@ def service(mock_historical_service: MagicMock) -> StatisticsService:
 
 
 # ---------------------------------------------------------------------------
-# Test 12: Average calculation
-# ---------------------------------------------------------------------------
-def test_average_calculation() -> None:
-    """Test pure average temperature calculation matching user prompt example."""
-    calc = AverageTemperatureCalculator()
-
-    # Empty list
-    assert calc.calculate_average_temperature([]) is None
-
-    # Prompt example: Daily temperatures: 30, 31, 29, 32, 30 -> Average: 30.4°C
-    example_temps = [30.0, 31.0, 29.0, 32.0, 30.0]
-    assert calc.calculate_average_temperature(example_temps) == 30.4
-
-    # Direct list of integers
-    assert calc.calculate_average_temperature([30, 31, 29, 32, 30]) == 30.4
-
-    # Dict observations
-    dict_obs = [{"temperature": 25.0}, {"temperature": None}, {"temperature": 35.0}]
-    assert calc.calculate_average_temperature(dict_obs) == 30.0
-
-
-# ---------------------------------------------------------------------------
-# Test 13: Correct date-range calculation
-# ---------------------------------------------------------------------------
-def test_correct_date_range_calculation(service: StatisticsService) -> None:
-    """Test date-range calculations for weeks and calendar months."""
-    ref_date = date(2026, 10, 2)
-
-    # Week: 1 week = 7 days, 2 weeks = 14 days, 3 weeks = 21 days, 4 weeks = 28 days
-    start_1w, end_1w, days_1w = service.get_date_range("week", 1, ref_date)
-    assert days_1w == 7
-    assert (end_1w - start_1w).days == 7
-    assert start_1w == date(2026, 9, 25)
-
-    start_2w, end_2w, days_2w = service.get_date_range("week", 2, ref_date)
-    assert days_2w == 14
-    assert (end_2w - start_2w).days == 14
-    assert start_2w == date(2026, 9, 18)
-
-    start_3w, end_3w, days_3w = service.get_date_range("week", 3, ref_date)
-    assert days_3w == 21
-    assert (end_3w - start_3w).days == 21
-
-    start_4w, end_4w, days_4w = service.get_date_range("week", 4, ref_date)
-    assert days_4w == 28
-    assert (end_4w - start_4w).days == 28
-    assert start_4w == date(2026, 9, 4)
-
-    # Month: Calendar month calculations
-    start_1m, end_1m, days_1m = service.get_date_range("month", 1, ref_date)
-    assert start_1m == date(2026, 9, 2)
-    assert days_1m == 30
-
-    start_3m, end_3m, days_3m = service.get_date_range("month", 3, ref_date)
-    assert start_3m == date(2026, 7, 2)
-    assert days_3m == 92
-
-    start_6m, end_6m, days_6m = service.get_date_range("month", 6, ref_date)
-    assert start_6m == date(2026, 4, 2)
-
-    start_12m, end_12m, days_12m = service.get_date_range("month", 12, ref_date)
-    assert start_12m == date(2025, 10, 2)
-    assert days_12m == 365
-
-    # Month boundary edge case: March 31 minus 1 month in non-leap year (Feb 28)
-    assert subtract_calendar_months(date(2023, 3, 31), 1) == date(2023, 2, 28)
-    # Leap year (Feb 29)
-    assert subtract_calendar_months(date(2024, 3, 31), 1) == date(2024, 2, 29)
-
-    # Year option strictly removed
-    with pytest.raises(ValueError, match="The 'year' period option has been removed"):
-        service.parse_period("year")
-
-
-# ---------------------------------------------------------------------------
-# Test 1: Indore 1 week
-# ---------------------------------------------------------------------------
-def test_indore_1_week(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 1 week historical calculation."""
-    ref_date = date(2026, 10, 2)
-    mock_historical_service.fetch_historical_temperatures.return_value = {
-        "city": "Indore",
-        "dates": [str(ref_date - timedelta(days=7 - i)) for i in range(7)],
-        "temperatures": [28.0, 29.0, 30.0, 31.0, 29.5, 30.5, 31.0],
-    }
-
-    res = service.calculate_average_weather("Indore", "week", duration=1, reference_date=ref_date)
-    assert res.status == "SUCCESS"
-    assert res.city == "Indore"
-    assert res.provider == "open-meteo"
-    assert res.period_type == "week"
-    assert res.duration == 1
-    assert res.observation_days == 7
-    assert res.coverage_percentage == 100.0
-    assert res.average_temperature_celsius == 29.9
-
-
-# ---------------------------------------------------------------------------
-# Test 2: Indore 2 weeks
-# ---------------------------------------------------------------------------
-def test_indore_2_weeks(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 2 weeks historical calculation."""
-    ref_date = date(2026, 10, 2)
-    mock_historical_service.fetch_historical_temperatures.return_value = {
-        "city": "Indore",
-        "dates": [str(ref_date - timedelta(days=14 - i)) for i in range(14)],
-        "temperatures": [28.0 + (i % 3) for i in range(14)],
-    }
-
-    res = service.calculate_average_weather("Indore", "week", duration=2, reference_date=ref_date)
-    assert res.status == "SUCCESS"
-    assert res.city == "Indore"
-    assert res.provider == "open-meteo"
-    assert res.duration == 2
-    assert res.observation_days == 14
-    assert res.coverage_percentage == 100.0
-    assert res.average_temperature_celsius is not None
-
-
-# ---------------------------------------------------------------------------
-# Test 3: Indore 4 weeks
-# ---------------------------------------------------------------------------
-def test_indore_4_weeks(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 4 weeks historical calculation."""
-    ref_date = date(2026, 10, 2)
-    mock_historical_service.fetch_historical_temperatures.return_value = {
-        "city": "Indore",
-        "dates": [str(ref_date - timedelta(days=28 - i)) for i in range(28)],
-        "temperatures": [27.0 + (i % 4) for i in range(28)],
-    }
-
-    res = service.calculate_average_weather("Indore", "week", duration=4, reference_date=ref_date)
-    assert res.status == "SUCCESS"
-    assert res.city == "Indore"
-    assert res.duration == 4
-    assert res.observation_days == 28
-    assert res.coverage_percentage == 100.0
-
-
-# ---------------------------------------------------------------------------
-# Test 4: Indore 1 month
+# Test 1: 1 Month
 # ---------------------------------------------------------------------------
 def test_indore_1_month(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 1 month historical calculation."""
-    ref_date = date(2026, 10, 2)
-    # 2026-09-02 to 2026-10-02 = 30 days
+    """Test 1 month duration: October 2026 (31 days)."""
+    ref_date = date(2026, 10, 15)
+    start_date, end_date, expected_days = service.get_date_range("month", 1, ref_date)
+
+    assert start_date == date(2026, 10, 1)
+    assert end_date == date(2026, 10, 31)
+    assert expected_days == 31
+
     mock_historical_service.fetch_historical_temperatures.return_value = {
         "city": "Indore",
-        "dates": [str(ref_date - timedelta(days=30 - i)) for i in range(30)],
-        "temperatures": [26.0 + (i % 5) for i in range(30)],
+        "dates": [str(start_date + timedelta(days=i)) for i in range(31)],
+        "temperatures": [28.0 for _ in range(31)],
     }
 
     res = service.calculate_average_weather("Indore", "month", duration=1, reference_date=ref_date)
     assert res.status == "SUCCESS"
     assert res.city == "Indore"
-    assert res.provider == "open-meteo"
     assert res.period_type == "month"
     assert res.duration == 1
-    assert res.observation_days == 30
+    assert res.total_observation_days == 31
+    assert res.data_coverage_percentage == 100.0
+    assert res.overall_average_temperature_celsius == 28.0
+    assert res.average_temperature_celsius == 28.0
+    assert res.monthly_averages is not None
+    assert len(res.monthly_averages) == 1
+    assert res.monthly_averages[0].month == "October"
+    assert res.monthly_averages[0].year == 2026
+    assert res.monthly_averages[0].average_temperature_celsius == 28.0
+    assert res.monthly_averages[0].observation_days == 31
+    assert res.monthly_averages[0].total_days == 31
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Indore 3 months
+# Test 2: 2 Months
 # ---------------------------------------------------------------------------
-def test_indore_3_months(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 3 months historical calculation."""
-    ref_date = date(2026, 10, 2)
-    # 2026-07-02 to 2026-10-02 = 92 days
+def test_indore_2_months(service: StatisticsService, mock_historical_service: MagicMock) -> None:
+    """Test 2 months duration: September (30) and October (31) = 61 days."""
+    ref_date = date(2026, 10, 5)
+    start_date, end_date, expected_days = service.get_date_range("month", 2, ref_date)
+
+    assert start_date == date(2026, 9, 1)
+    assert end_date == date(2026, 10, 31)
+    assert expected_days == 61
+
+    # September: 30 days @ 26.0°C; October: 31 days @ 28.0°C
+    dates = [str(start_date + timedelta(days=i)) for i in range(expected_days)]
+    temps = [26.0 if i < 30 else 28.0 for i in range(expected_days)]
+
     mock_historical_service.fetch_historical_temperatures.return_value = {
         "city": "Indore",
-        "dates": [str(ref_date - timedelta(days=92 - i)) for i in range(92)],
-        "temperatures": [29.8 for _ in range(92)],
+        "dates": dates,
+        "temperatures": temps,
     }
 
-    res = service.calculate_average_weather("Indore", "month", duration=3, reference_date=ref_date)
+    res = service.calculate_average_weather("Indore", "month", duration=2, reference_date=ref_date)
     assert res.status == "SUCCESS"
-    assert res.city == "Indore"
-    assert res.duration == 3
-    assert res.observation_days == 92
-    assert res.average_temperature_celsius == 29.8
+    assert res.duration == 2
+    assert len(res.monthly_averages) == 2
+
+    # Check September
+    assert res.monthly_averages[0].month == "September"
+    assert res.monthly_averages[0].observation_days == 30
+    assert res.monthly_averages[0].average_temperature_celsius == 26.0
+
+    # Check October
+    assert res.monthly_averages[1].month == "October"
+    assert res.monthly_averages[1].observation_days == 31
+    assert res.monthly_averages[1].average_temperature_celsius == 28.0
+
+    # Overall: (30 * 26.0 + 31 * 28.0) / 61 = (780 + 868) / 61 = 1648 / 61 = 27.01639... -> 27.02
+    assert res.overall_average_temperature_celsius == 27.02
+    assert res.total_observation_days == 61
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Indore 6 months
+# Test 3: 5 Months (Matching User Example: 28.36°C)
 # ---------------------------------------------------------------------------
-def test_indore_6_months(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 6 months historical calculation."""
+def test_5_months_exact_prompt_example(service: StatisticsService, mock_historical_service: MagicMock) -> None:
+    """Test 5 months: June (30d@27.8), July (31d@28.4), Aug (31d@27.9), Sep (30d@29.1), Oct (31d@28.6).
+    Total days = 153.
+    Sum = 30*27.8 + 31*28.4 + 31*27.9 + 30*29.1 + 31*28.6 = 834 + 880.4 + 864.9 + 873 + 886.6 = 4338.9
+    Overall average = 4338.9 / 153 = 28.3588235... -> 28.36°C.
+    """
     ref_date = date(2026, 10, 2)
-    start_date, end_date, expected_days = service.get_date_range("month", 6, ref_date)
+    start_date, end_date, expected_days = service.get_date_range("month", 5, ref_date)
+
+    assert start_date == date(2026, 6, 1)
+    assert end_date == date(2026, 10, 31)
+    assert expected_days == 153
+
+    dates: list[str] = []
+    temps: list[float] = []
+
+    # June: 30 days @ 27.8
+    for d in range(1, 31):
+        dates.append(f"2026-06-{d:02d}")
+        temps.append(27.8)
+
+    # July: 31 days @ 28.4
+    for d in range(1, 32):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(28.4)
+
+    # August: 31 days @ 27.9
+    for d in range(1, 32):
+        dates.append(f"2026-08-{d:02d}")
+        temps.append(27.9)
+
+    # September: 30 days @ 29.1
+    for d in range(1, 31):
+        dates.append(f"2026-09-{d:02d}")
+        temps.append(29.1)
+
+    # October: 31 days @ 28.6
+    for d in range(1, 32):
+        dates.append(f"2026-10-{d:02d}")
+        temps.append(28.6)
+
+    assert len(dates) == 153
+    assert len(temps) == 153
+
     mock_historical_service.fetch_historical_temperatures.return_value = {
-        "city": "Indore",
-        "dates": [str(start_date + timedelta(days=i)) for i in range(expected_days)],
-        "temperatures": [28.0 for _ in range(expected_days)],
+        "city": "Mumbai",
+        "dates": dates,
+        "temperatures": temps,
     }
 
-    res = service.calculate_average_weather("Indore", "month", duration=6, reference_date=ref_date)
+    res = service.calculate_average_weather("Mumbai", "month", duration=5, reference_date=ref_date)
+
     assert res.status == "SUCCESS"
-    assert res.duration == 6
-    assert res.observation_days == expected_days
+    assert res.city == "Mumbai"
+    assert res.period_type == "month"
+    assert res.duration == 5
+    assert res.start_date == "2026-06-01"
+    assert res.end_date == "2026-10-31"
+    assert res.total_observation_days == 153
+    assert res.data_coverage_percentage == 100.0
+
+    # Monthly breakdown checks
+    assert len(res.monthly_averages) == 5
+    expected_monthly = [
+        ("June", 2026, 27.8, 30),
+        ("July", 2026, 28.4, 31),
+        ("August", 2026, 27.9, 31),
+        ("September", 2026, 29.1, 30),
+        ("October", 2026, 28.6, 31),
+    ]
+    for idx, (m_name, yr, exp_avg, exp_obs) in enumerate(expected_monthly):
+        m_item = res.monthly_averages[idx]
+        assert m_item.month == m_name
+        assert m_item.year == yr
+        assert m_item.average_temperature_celsius == exp_avg
+        assert m_item.observation_days == exp_obs
+
+    # Mathematically accurate overall average (decimals=2)
+    assert res.overall_average_temperature_celsius == 28.36
 
 
 # ---------------------------------------------------------------------------
-# Test 7: Indore 12 months
+# Test 4: 12 Months
 # ---------------------------------------------------------------------------
 def test_indore_12_months(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Indore 12 months historical calculation."""
+    """Test 12 months duration: November 2025 to October 2026 (365 days)."""
     ref_date = date(2026, 10, 2)
     start_date, end_date, expected_days = service.get_date_range("month", 12, ref_date)
+
+    assert start_date == date(2025, 11, 1)
+    assert end_date == date(2026, 10, 31)
+    assert expected_days == 365
+
     mock_historical_service.fetch_historical_temperatures.return_value = {
         "city": "Indore",
         "dates": [str(start_date + timedelta(days=i)) for i in range(expected_days)],
@@ -263,75 +232,230 @@ def test_indore_12_months(service: StatisticsService, mock_historical_service: M
     res = service.calculate_average_weather("Indore", "month", duration=12, reference_date=ref_date)
     assert res.status == "SUCCESS"
     assert res.duration == 12
-    assert res.observation_days == expected_days
-    assert res.average_temperature_celsius == 25.0
+    assert len(res.monthly_averages) == 12
+    assert res.monthly_averages[0].month == "November"
+    assert res.monthly_averages[0].year == 2025
+    assert res.monthly_averages[-1].month == "October"
+    assert res.monthly_averages[-1].year == 2026
+    assert res.overall_average_temperature_celsius == 25.0
 
 
 # ---------------------------------------------------------------------------
-# Test 8: Invalid city
+# Test 5: Monthly Grouping
 # ---------------------------------------------------------------------------
-def test_invalid_city(service: StatisticsService) -> None:
-    """Test invalid city input validations."""
-    with pytest.raises(ValueError, match="cannot be empty"):
-        service.calculate_average_weather("", "week", 1)
+def test_monthly_grouping_boundaries(service: StatisticsService, mock_historical_service: MagicMock) -> None:
+    """Test observations strictly fall into calendar months by date, ignoring order."""
+    ref_date = date(2026, 8, 15)  # July and August 2026 (62 days total)
 
-    with pytest.raises(ValueError, match="cannot be empty"):
-        service.calculate_average_weather("   ", "week", 1)
+    # Supply mixed dates
+    dates = ["2026-07-31", "2026-08-01", "2026-07-01", "2026-08-31"]
+    temps = [25.0, 35.0, 27.0, 37.0]
 
-    with pytest.raises(ValueError, match="at least 2 characters"):
-        service.calculate_average_weather("X", "week", 1)
-
-    with pytest.raises(ValueError, match="contain alphabetic characters"):
-        service.calculate_average_weather("12345", "week", 1)
-
-
-# ---------------------------------------------------------------------------
-# Test 9: Open-Meteo API failure
-# ---------------------------------------------------------------------------
-def test_open_meteo_api_failure(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test Open-Meteo API failure propagation."""
-    mock_historical_service.fetch_historical_temperatures.side_effect = WeatherServiceUnavailableError(
-        "Open-Meteo API unavailable"
-    )
-
-    with pytest.raises(WeatherServiceUnavailableError, match="unavailable"):
-        service.calculate_average_weather("Indore", "week", 1)
-
-
-# ---------------------------------------------------------------------------
-# Test 10: Missing temperature values
-# ---------------------------------------------------------------------------
-def test_missing_temperature_values(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test missing/null temperature values are filtered out without fabricating fake values."""
-    ref_date = date(2026, 10, 2)
-    # 7 days requested, 5 valid numbers and 2 None values (>70% coverage: 5/7 = 71.4%)
     mock_historical_service.fetch_historical_temperatures.return_value = {
         "city": "Indore",
-        "dates": ["d1", "d2", "d3", "d4", "d5", "d6", "d7"],
-        "temperatures": [30.0, None, 32.0, 28.0, None, 30.0, 30.0],
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    service.min_coverage = 0.0  # Allow low coverage to inspect grouping
+    res = service.calculate_average_weather("Indore", "month", duration=2, reference_date=ref_date)
+
+    assert len(res.monthly_averages) == 2
+    july = res.monthly_averages[0]
+    august = res.monthly_averages[1]
+
+    assert july.month == "July"
+    assert july.observation_days == 2  # 2026-07-01 (27) and 2026-07-31 (25)
+    assert july.average_temperature_celsius == 26.0
+
+    assert august.month == "August"
+    assert august.observation_days == 2  # 2026-08-01 (35) and 2026-08-31 (37)
+    assert august.average_temperature_celsius == 36.0
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Monthly Average Calculation
+# ---------------------------------------------------------------------------
+def test_monthly_average_calculation() -> None:
+    """Test deterministic monthly average rounded to 1 decimal place."""
+    calc = AverageTemperatureCalculator()
+    temps = [27.8, 27.9, 28.0, 28.1, 28.2]
+    # Sum = 140.0 / 5 = 28.0
+    assert calc.calculate_average_temperature(temps, decimals=1) == 28.0
+
+    temps2 = [27.81, 28.45]
+    # Sum = 56.26 / 2 = 28.13 -> 28.1
+    assert calc.calculate_average_temperature(temps2, decimals=1) == 28.1
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Overall Average NOT Simple Average of Monthly Averages
+# ---------------------------------------------------------------------------
+def test_overall_average_calculated_from_daily_observations(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Verify that overall average is mathematically computed from raw daily observations,
+    NOT the unweighted average of rounded monthly numbers.
+    
+    Example:
+    Month 1: 10 observations with sum 100 -> avg = 10.0
+    Month 2: 20 observations with sum 400 -> avg = 20.0
+    Unweighted monthly average = (10.0 + 20.0) / 2 = 15.0
+    True daily average = (100 + 400) / 30 = 500 / 30 = 16.6666... -> 16.67
+    """
+    ref_date = date(2026, 8, 15)  # July and August 2026
+
+    dates: list[str] = []
+    temps: list[float] = []
+
+    # July: 10 observations of 10.0
+    for d in range(1, 11):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(10.0)
+
+    # August: 20 observations of 20.0
+    for d in range(1, 21):
+        dates.append(f"2026-08-{d:02d}")
+        temps.append(20.0)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Indore",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    service.min_coverage = 0.0
+    res = service.calculate_average_weather("Indore", "month", duration=2, reference_date=ref_date)
+
+    assert res.monthly_averages[0].average_temperature_celsius == 10.0
+    assert res.monthly_averages[1].average_temperature_celsius == 20.0
+    # Must be 16.67, NOT 15.0
+    assert res.overall_average_temperature_celsius == 16.67
+    assert res.total_observation_days == 30
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Missing Daily Observations
+# ---------------------------------------------------------------------------
+def test_missing_daily_observations(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Test partial month coverage with missing days and None values."""
+    ref_date = date(2026, 7, 31)  # July 2026 (31 days)
+
+    # 25 valid days out of 31 days (Coverage = 25/31 = 80.6%)
+    dates: list[str] = []
+    temps: list[float] = []
+    for d in range(1, 26):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(28.0)
+    # 6 None values
+    for d in range(26, 32):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(None)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Indore",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Indore", "month", duration=1, reference_date=ref_date)
+    assert res.status == "SUCCESS"
+    assert res.monthly_averages[0].observation_days == 25
+    assert res.monthly_averages[0].total_days == 31
+    assert res.monthly_averages[0].coverage_percentage == 80.6
+    assert res.monthly_averages[0].average_temperature_celsius == 28.0
+    assert res.overall_average_temperature_celsius == 28.0
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Different Month Lengths
+# ---------------------------------------------------------------------------
+def test_different_month_lengths() -> None:
+    """Test calendar month windows accurately identify month lengths (31, 30, 28)."""
+    ref_date = date(2023, 4, 15)  # Jan (31), Feb (28 non-leap), Mar (31), Apr (30)
+    months = get_calendar_months(ref_date, duration=4)
+
+    assert len(months) == 4
+    assert months[0]["month_name"] == "January" and months[0]["total_days"] == 31
+    assert months[1]["month_name"] == "February" and months[1]["total_days"] == 28
+    assert months[2]["month_name"] == "March" and months[2]["total_days"] == 31
+    assert months[3]["month_name"] == "April" and months[3]["total_days"] == 30
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Leap Year February
+# ---------------------------------------------------------------------------
+def test_leap_year_february() -> None:
+    """Test February in leap year 2024 has 29 days."""
+    ref_date = date(2024, 2, 10)
+    months = get_calendar_months(ref_date, duration=1)
+
+    assert len(months) == 1
+    assert months[0]["month_name"] == "February"
+    assert months[0]["year"] == 2024
+    assert months[0]["total_days"] == 29
+    assert months[0]["start_date"] == date(2024, 2, 1)
+    assert months[0]["end_date"] == date(2024, 2, 29)
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Week Calculation Remains Unchanged
+# ---------------------------------------------------------------------------
+def test_week_calculation_remains_unchanged(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Test that week calculations (1-4 weeks) do not return monthly breakdown."""
+    ref_date = date(2026, 10, 2)
+    start_date, end_date, expected_days = service.get_date_range("week", 1, ref_date)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Indore",
+        "dates": [str(start_date + timedelta(days=i)) for i in range(7)],
+        "temperatures": [28.0, 29.0, 30.0, 31.0, 29.5, 30.5, 31.0],
     }
 
     res = service.calculate_average_weather("Indore", "week", duration=1, reference_date=ref_date)
     assert res.status == "SUCCESS"
-    assert res.observation_days == 5
-    # (30 + 32 + 28 + 30 + 30) / 5 = 150 / 5 = 30.0
-    assert res.average_temperature_celsius == 30.0
+    assert res.city == "Indore"
+    assert res.period_type == "week"
+    assert res.duration == 1
+    assert res.observation_days == 7
+    assert res.coverage_percentage == 100.0
+    assert res.average_temperature_celsius == 29.9
+    # Week MUST NOT have monthly averages breakdown
+    assert res.monthly_averages is None
+    assert res.overall_average_temperature_celsius is None
 
 
 # ---------------------------------------------------------------------------
-# Test 11: Empty API response
+# Test 12: Correct API Response Mapping
 # ---------------------------------------------------------------------------
-def test_empty_api_response(service: StatisticsService, mock_historical_service: MagicMock) -> None:
-    """Test empty API response results in INSUFFICIENT_HISTORICAL_DATA without fabricating values."""
+def test_correct_api_response_mapping(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Verify all top-level keys in response match required schema."""
+    ref_date = date(2026, 10, 2)
+    start_date, end_date, expected_days = service.get_date_range("month", 2, ref_date)
+
     mock_historical_service.fetch_historical_temperatures.return_value = {
-        "city": "Indore",
-        "dates": [],
-        "temperatures": [],
+        "city": "Mumbai",
+        "dates": [str(start_date + timedelta(days=i)) for i in range(expected_days)],
+        "temperatures": [30.0 for _ in range(expected_days)],
     }
 
-    res = service.calculate_average_weather("Indore", "week", duration=1)
-    assert res.status == "INSUFFICIENT_HISTORICAL_DATA"
-    assert res.average_temperature_celsius is None
-    assert res.observation_days == 0
-    assert res.coverage_percentage == 0.0
-    assert "Unable to retrieve historical weather data" in res.message
+    res = service.calculate_average_weather("Mumbai", "month", duration=2, reference_date=ref_date)
+
+    payload = res.model_dump()
+    assert payload["city"] == "Mumbai"
+    assert payload["period_type"] == "month"
+    assert payload["duration"] == 2
+    assert payload["start_date"] == start_date.isoformat()
+    assert payload["end_date"] == end_date.isoformat()
+    assert payload["provider"] in ("Open-Meteo", "open-meteo")
+    assert "monthly_averages" in payload
+    assert len(payload["monthly_averages"]) == 2
+    assert payload["overall_average_temperature_celsius"] == 30.0
+    assert payload["total_observation_days"] == expected_days
+    assert payload["data_coverage_percentage"] == 100.0

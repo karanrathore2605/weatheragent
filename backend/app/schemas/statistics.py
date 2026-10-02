@@ -2,6 +2,7 @@
 
 from app.schemas.weather_schema import (
     CoverageInfo,
+    MonthlyAverage,
     StatisticsMetrics,
     StatisticsPeriod,
     WeatherStatisticsRequest,
@@ -10,6 +11,7 @@ from app.schemas.weather_schema import (
 
 __all__ = [
     "CoverageInfo",
+    "MonthlyAverage",
     "StatisticsMetrics",
     "StatisticsPeriod",
     "WeatherStatisticsRequest",

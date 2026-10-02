@@ -98,38 +98,63 @@ class WeatherStatisticsRequest(BaseModel):
     )
 
 
-class WeatherStatisticsResponse(BaseModel):
-    """Structured response payload for weather statistics."""
+class MonthlyAverage(BaseModel):
+    """Monthly historical temperature metrics."""
 
-    city: str = Field(..., description="Target city name", examples=["Indore"])
-    provider: str = Field("open-meteo", description="Weather data provider identifier", examples=["open-meteo"])
-    period_type: str = Field("week", description="Statistical aggregation period ('week' or 'month')", examples=["week"])
-    duration: int = Field(1, description="Period duration value (1-4 for week; 1-12 for month)", examples=[1])
-    period_value: int = Field(1, description="Period duration value alias", examples=[1])
-    start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-07-02"])
-    end_date: Optional[str] = Field(None, description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-02"])
-    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius", examples=[29.8])
-    observation_days: Optional[int] = Field(None, description="Number of valid daily observations used", examples=[92])
-    coverage_percentage: Optional[float] = Field(None, description="Data coverage percentage for the requested period", examples=[100.0])
+    month: str = Field(..., description="Month name (e.g. 'June')", examples=["June"])
+    year: int = Field(..., description="Year number (e.g. 2026)", examples=[2026])
+    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius for this month", examples=[27.8])
+    observation_days: int = Field(..., description="Number of valid daily observations in this month", examples=[30])
+    total_days: Optional[int] = Field(None, description="Total days in this calendar month", examples=[30])
+    coverage_percentage: Optional[float] = Field(None, description="Data coverage percentage for this month", examples=[100.0])
+    start_date: Optional[str] = Field(None, description="Start date of this calendar month", examples=["2026-06-01"])
+    end_date: Optional[str] = Field(None, description="End date of this calendar month", examples=["2026-06-30"])
+
+
+class WeatherStatisticsResponse(BaseModel):
+    """Structured response payload for weather statistics with monthly breakdown."""
+
+    city: str = Field(..., description="Target city name", examples=["Mumbai"])
+    provider: str = Field("Open-Meteo", description="Weather data provider identifier", examples=["Open-Meteo"])
+    period_type: str = Field("month", description="Statistical aggregation period ('week' or 'month')", examples=["month"])
+    duration: int = Field(1, description="Period duration value (1-4 for week; 1-12 for month)", examples=[5])
+    period_value: int = Field(1, description="Period duration value alias", examples=[5])
+    start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-06-01"])
+    end_date: Optional[str] = Field(None, description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-31"])
+
+    # Monthly breakdown for multi-month requests
+    monthly_averages: Optional[List[MonthlyAverage]] = Field(None, description="Month-by-month temperature breakdown for multi-month periods")
+
+    # Overall temperature metrics
+    overall_average_temperature_celsius: Optional[float] = Field(None, description="Overall average temperature in Celsius across the complete period", examples=[28.36])
+    average_temperature_celsius: Optional[float] = Field(None, description="Average temperature in Celsius alias", examples=[28.36])
+
+    # Observation day metrics
+    total_observation_days: Optional[int] = Field(None, description="Total valid daily observations across all months", examples=[153])
+    observation_days: Optional[int] = Field(None, description="Observation days alias", examples=[153])
+
+    # Coverage metrics
+    data_coverage_percentage: Optional[float] = Field(None, description="Overall data coverage percentage", examples=[100.0])
+    coverage_percentage: Optional[float] = Field(None, description="Coverage percentage alias", examples=[100.0])
     data_coverage: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"complete": True}, description="Data coverage details")
-    data_source: str = Field("open-meteo", description="Weather data source identifier", examples=["open-meteo"])
+    data_source: str = Field("Open-Meteo", description="Weather data source identifier", examples=["Open-Meteo"])
     coverage: CoverageInfo = Field(default_factory=lambda: CoverageInfo(complete=True), description="Coverage assessment details")
     statistics: Optional[StatisticsMetrics] = Field(None, description="Calculated meteorological statistics")
     status: str = Field("SUCCESS", description="Operation status ('SUCCESS' or 'INSUFFICIENT_HISTORICAL_DATA')", examples=["SUCCESS"])
     message: Optional[str] = Field(None, description="Status or guidance message", examples=["Unable to retrieve historical weather data right now. Please try again."])
 
     # Backward compatibility convenience fields
-    period: Optional[str] = Field(None, description="Legacy period alias", examples=["week"])
-    average_temperature: Optional[float] = Field(None, description="Average temperature in Celsius alias", examples=[31.8])
+    period: Optional[str] = Field(None, description="Legacy period alias", examples=["month"])
+    average_temperature: Optional[float] = Field(None, description="Average temperature in Celsius alias", examples=[28.36])
     minimum_temperature: Optional[float] = Field(None, description="Minimum temperature in Celsius", examples=[27.1])
     maximum_temperature: Optional[float] = Field(None, description="Maximum temperature in Celsius", examples=[38.2])
     average_feels_like_temperature: Optional[float] = Field(None, description="Average perceived temperature in Celsius", examples=[34.0])
     average_humidity: Optional[float] = Field(None, description="Average relative humidity percentage", examples=[58.5])
     average_wind_speed: Optional[float] = Field(None, description="Average wind speed in km/h", examples=[12.3])
     total_precipitation: Optional[float] = Field(None, description="Total precipitation in mm", examples=[5.2])
-    observation_count: Optional[int] = Field(None, description="Total observations used in calculation", examples=[168])
+    observation_count: Optional[int] = Field(None, description="Total observations used in calculation", examples=[153])
     coverage_percent: Optional[float] = Field(None, description="Data coverage percentage for the requested period", examples=[100.0])
-    available_from: Optional[str] = Field(None, description="Earliest available observation date if insufficient data", examples=["2026-09-25"])
-    available_to: Optional[str] = Field(None, description="Latest available observation date if insufficient data", examples=["2026-10-02"])
+    available_from: Optional[str] = Field(None, description="Earliest available observation date if insufficient data", examples=["2026-06-01"])
+    available_to: Optional[str] = Field(None, description="Latest available observation date if insufficient data", examples=["2026-10-31"])
 
 

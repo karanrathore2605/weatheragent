@@ -9,6 +9,7 @@ from app.config.settings import settings
 from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import (
     CoverageInfo,
+    MonthlyAverage,
     StatisticsMetrics,
     StatisticsPeriod,
     WeatherStatisticsResponse,
@@ -35,6 +36,46 @@ def subtract_calendar_months(source_date: date, months: int) -> date:
     max_days = calendar.monthrange(new_year, new_month)[1]
     new_day = min(source_date.day, max_days)
     return date(new_year, new_month, new_day)
+
+
+def get_calendar_months(reference_date: date, duration: int) -> List[Dict[str, Any]]:
+    """Accurately compute the sequence of complete calendar months ending at reference_date's month.
+
+    Example:
+    If reference_date is in October 2026 and duration is 5:
+    Returns 5 calendar month dictionaries:
+    June 2026, July 2026, August 2026, September 2026, October 2026.
+
+    Each item contains:
+    - year: int
+    - month_num: int (1-12)
+    - month_name: str (e.g. 'June')
+    - start_date: date (e.g. date(2026, 6, 1))
+    - end_date: date (e.g. date(2026, 6, 30))
+    - total_days: int (number of calendar days in month, e.g. 30, 31, 28/29)
+    """
+    ref_year = reference_date.year
+    ref_month = reference_date.month
+
+    months: List[Dict[str, Any]] = []
+    for offset in range(duration - 1, -1, -1):
+        total_months = ref_year * 12 + (ref_month - 1) - offset
+        target_year = total_months // 12
+        target_month = (total_months % 12) + 1
+        num_days = calendar.monthrange(target_year, target_month)[1]
+        m_start = date(target_year, target_month, 1)
+        m_end = date(target_year, target_month, num_days)
+        m_name = calendar.month_name[target_month]
+
+        months.append({
+            "year": target_year,
+            "month_num": target_month,
+            "month_name": m_name,
+            "start_date": m_start,
+            "end_date": m_end,
+            "total_days": num_days,
+        })
+    return months
 
 
 class StatisticsService:
@@ -174,8 +215,10 @@ class StatisticsService:
             expected_days = days
 
         elif period_enum == StatisticsPeriod.MONTH:
-            start_date = subtract_calendar_months(end_date, duration)
-            expected_days = max(1, (end_date - start_date).days)
+            month_windows = get_calendar_months(end_date, duration)
+            start_date = month_windows[0]["start_date"]
+            end_date = month_windows[-1]["end_date"]
+            expected_days = sum(m["total_days"] for m in month_windows)
 
         else:
             raise ValueError(f"Unsupported period: {period_enum}")
@@ -197,18 +240,26 @@ class StatisticsService:
         2. Compute date range (previous 7-28 days or 1-12 calendar months).
         3. Request historical data via HistoricalWeatherService (Open-Meteo Archive API).
         4. Validate temperature data, filter nulls without fabricating numbers.
-        5. Compute average temperature via AverageTemperatureCalculator.
-        6. Return structured WeatherStatisticsResponse.
+        5. For multi-month requests, calculate individual monthly averages and overall average.
+        6. For week requests, calculate single average temperature.
+        7. Return structured WeatherStatisticsResponse.
         """
         valid_city = self.validate_city_input(city)
         period_enum = self.parse_period(period)
         effective_duration = duration if duration is not None else period_value
         valid_duration = self.validate_period_value(period_enum, effective_duration)
 
+        if reference_date is None:
+            ref_date = datetime.now(timezone.utc).date()
+        elif isinstance(reference_date, datetime):
+            ref_date = reference_date.date()
+        else:
+            ref_date = reference_date
+
         start_date, end_date, expected_days = self.get_date_range(
             period=period_enum,
             period_value=valid_duration,
-            reference_date=reference_date,
+            reference_date=ref_date,
         )
 
         period_label = (
@@ -232,93 +283,236 @@ class StatisticsService:
         )
 
         resolved_city = result.get("city", valid_city)
+        dates = result.get("dates", [])
         raw_temperatures = result.get("temperatures", [])
 
-        # Filter genuinely missing / null observations
-        valid_temps: List[float] = []
-        for t in raw_temperatures:
-            if t is not None:
-                try:
-                    valid_temps.append(float(t))
-                except (ValueError, TypeError):
-                    continue
+        # ===================================================================
+        # Branch 1: WEEK CALCULATION
+        # ===================================================================
+        if period_enum == StatisticsPeriod.WEEK:
+            valid_temps: List[float] = []
+            for t in raw_temperatures:
+                if t is not None:
+                    try:
+                        valid_temps.append(float(t))
+                    except (ValueError, TypeError):
+                        continue
 
-        observation_days = len(valid_temps)
-        coverage_percent = round(
-            min(100.0, (observation_days / expected_days) * 100.0) if expected_days > 0 else 0.0,
-            1,
-        )
-
-        # Insufficient data condition: 0 observations or below minimum coverage
-        if observation_days == 0 or coverage_percent < self.min_coverage:
-            logger.warning(
-                "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
-                resolved_city,
-                period_label,
-                observation_days,
-                expected_days,
-                coverage_percent,
-                self.min_coverage,
+            observation_days = len(valid_temps)
+            coverage_percent = round(
+                min(100.0, (observation_days / expected_days) * 100.0) if expected_days > 0 else 0.0,
+                1,
             )
+
+            # Insufficient data condition: 0 observations or below minimum coverage
+            if observation_days == 0 or coverage_percent < self.min_coverage:
+                logger.warning(
+                    "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
+                    resolved_city,
+                    period_label,
+                    observation_days,
+                    expected_days,
+                    coverage_percent,
+                    self.min_coverage,
+                )
+                return WeatherStatisticsResponse(
+                    city=resolved_city,
+                    provider="Open-Meteo",
+                    period_type=period_enum.value,
+                    duration=valid_duration,
+                    period_value=valid_duration,
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    monthly_averages=None,
+                    overall_average_temperature_celsius=None,
+                    average_temperature_celsius=None,
+                    total_observation_days=observation_days,
+                    observation_days=observation_days,
+                    data_coverage_percentage=coverage_percent,
+                    coverage_percentage=coverage_percent,
+                    data_coverage={"complete": False},
+                    data_source="Open-Meteo",
+                    coverage=CoverageInfo(
+                        requested=f"{period_label} ({expected_days} days)",
+                        available=f"{observation_days} days ({coverage_percent}%)",
+                        complete=False,
+                        percent=coverage_percent,
+                        observation_count=observation_days,
+                    ),
+                    statistics=None,
+                    status="INSUFFICIENT_HISTORICAL_DATA",
+                    message="Unable to retrieve historical weather data right now. Please try again.",
+                    period=period_enum.value,
+                    average_temperature=None,
+                    coverage_percent=coverage_percent,
+                    observation_count=observation_days,
+                )
+
+            # Calculate pure average temperature strictly from valid daily mean observations
+            avg_temp = self.temperature_calculator.calculate_average_temperature(valid_temps, decimals=1)
+
             return WeatherStatisticsResponse(
                 city=resolved_city,
-                provider="open-meteo",
+                provider="Open-Meteo",
                 period_type=period_enum.value,
                 duration=valid_duration,
                 period_value=valid_duration,
                 start_date=start_date.isoformat(),
                 end_date=end_date.isoformat(),
-                average_temperature_celsius=None,
+                monthly_averages=None,
+                overall_average_temperature_celsius=None,
+                average_temperature_celsius=avg_temp,
+                total_observation_days=observation_days,
                 observation_days=observation_days,
+                data_coverage_percentage=coverage_percent,
                 coverage_percentage=coverage_percent,
-                data_coverage={"complete": False},
-                data_source="open-meteo",
+                data_coverage={"complete": True},
+                data_source="Open-Meteo",
                 coverage=CoverageInfo(
                     requested=f"{period_label} ({expected_days} days)",
                     available=f"{observation_days} days ({coverage_percent}%)",
-                    complete=False,
+                    complete=True,
                     percent=coverage_percent,
                     observation_count=observation_days,
+                ),
+                statistics=StatisticsMetrics(
+                    average_temperature=avg_temp,
+                ),
+                status="SUCCESS",
+                message=None,
+                period=period_enum.value,
+                average_temperature=avg_temp,
+                coverage_percent=coverage_percent,
+                observation_count=observation_days,
+            )
+
+        # ===================================================================
+        # Branch 2: MONTH CALCULATION (Month-by-month breakdown + overall average)
+        # ===================================================================
+        month_windows = get_calendar_months(ref_date, valid_duration)
+        monthly_averages: List[MonthlyAverage] = []
+        all_valid_temps: List[float] = []
+
+        for m in month_windows:
+            m_start = m["start_date"]
+            m_end = m["end_date"]
+            m_total_days = m["total_days"]
+
+            month_valid_temps: List[float] = []
+            for d_str, t in zip(dates, raw_temperatures):
+                if t is None:
+                    continue
+                try:
+                    d_obj = date.fromisoformat(d_str)
+                    val = float(t)
+                except (ValueError, TypeError):
+                    continue
+                if m_start <= d_obj <= m_end:
+                    month_valid_temps.append(val)
+
+            obs_count = len(month_valid_temps)
+            cov_pct = round((obs_count / m_total_days) * 100.0, 1) if m_total_days > 0 else 0.0
+            month_avg = self.temperature_calculator.calculate_average_temperature(month_valid_temps, decimals=1)
+
+            monthly_averages.append(
+                MonthlyAverage(
+                    month=m["month_name"],
+                    year=m["year"],
+                    average_temperature_celsius=month_avg,
+                    observation_days=obs_count,
+                    total_days=m_total_days,
+                    coverage_percentage=cov_pct,
+                    start_date=m_start.isoformat(),
+                    end_date=m_end.isoformat(),
+                )
+            )
+            all_valid_temps.extend(month_valid_temps)
+
+        total_observation_days = len(all_valid_temps)
+        overall_coverage = round(
+            min(100.0, (total_observation_days / expected_days) * 100.0) if expected_days > 0 else 0.0,
+            1,
+        )
+
+        # Insufficient data condition: 0 observations or below minimum coverage
+        if total_observation_days == 0 or overall_coverage < self.min_coverage:
+            logger.warning(
+                "Insufficient historical data for '%s' (%s): %d/%d days (%.1f%% < %.1f%%)",
+                resolved_city,
+                period_label,
+                total_observation_days,
+                expected_days,
+                overall_coverage,
+                self.min_coverage,
+            )
+            return WeatherStatisticsResponse(
+                city=resolved_city,
+                provider="Open-Meteo",
+                period_type=period_enum.value,
+                duration=valid_duration,
+                period_value=valid_duration,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                monthly_averages=monthly_averages,
+                overall_average_temperature_celsius=None,
+                average_temperature_celsius=None,
+                total_observation_days=total_observation_days,
+                observation_days=total_observation_days,
+                data_coverage_percentage=overall_coverage,
+                coverage_percentage=overall_coverage,
+                data_coverage={"complete": False},
+                data_source="Open-Meteo",
+                coverage=CoverageInfo(
+                    requested=f"{period_label} ({expected_days} days)",
+                    available=f"{total_observation_days} days ({overall_coverage}%)",
+                    complete=False,
+                    percent=overall_coverage,
+                    observation_count=total_observation_days,
                 ),
                 statistics=None,
                 status="INSUFFICIENT_HISTORICAL_DATA",
                 message="Unable to retrieve historical weather data right now. Please try again.",
                 period=period_enum.value,
                 average_temperature=None,
-                coverage_percent=coverage_percent,
-                observation_count=observation_days,
+                coverage_percent=overall_coverage,
+                observation_count=total_observation_days,
             )
 
-        # Calculate pure average temperature strictly from valid daily mean observations
-        avg_temp = self.temperature_calculator.calculate_average_temperature(valid_temps)
+        # Calculate pure overall average from all underlying daily observations (decimals=2)
+        overall_avg = self.temperature_calculator.calculate_average_temperature(all_valid_temps, decimals=2)
 
         return WeatherStatisticsResponse(
             city=resolved_city,
-            provider="open-meteo",
+            provider="Open-Meteo",
             period_type=period_enum.value,
             duration=valid_duration,
             period_value=valid_duration,
             start_date=start_date.isoformat(),
             end_date=end_date.isoformat(),
-            average_temperature_celsius=avg_temp,
-            observation_days=observation_days,
-            coverage_percentage=coverage_percent,
+            monthly_averages=monthly_averages,
+            overall_average_temperature_celsius=overall_avg,
+            average_temperature_celsius=overall_avg,
+            total_observation_days=total_observation_days,
+            observation_days=total_observation_days,
+            data_coverage_percentage=overall_coverage,
+            coverage_percentage=overall_coverage,
             data_coverage={"complete": True},
-            data_source="open-meteo",
+            data_source="Open-Meteo",
             coverage=CoverageInfo(
                 requested=f"{period_label} ({expected_days} days)",
-                available=f"{observation_days} days ({coverage_percent}%)",
+                available=f"{total_observation_days} days ({overall_coverage}%)",
                 complete=True,
-                percent=coverage_percent,
-                observation_count=observation_days,
+                percent=overall_coverage,
+                observation_count=total_observation_days,
             ),
             statistics=StatisticsMetrics(
-                average_temperature=avg_temp,
+                average_temperature=overall_avg,
             ),
             status="SUCCESS",
             message=None,
             period=period_enum.value,
-            average_temperature=avg_temp,
-            coverage_percent=coverage_percent,
-            observation_count=observation_days,
+            average_temperature=overall_avg,
+            coverage_percent=overall_coverage,
+            observation_count=total_observation_days,
         )
+

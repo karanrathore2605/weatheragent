@@ -19,14 +19,15 @@ class AverageTemperatureCalculator:
     """Specialized calculator computing average temperature from observations."""
 
     @staticmethod
-    def calculate_average_temperature(observations: List[Any]) -> Optional[float]:
+    def calculate_average_temperature(observations: List[Any], decimals: int = 1) -> Optional[float]:
         """Compute the average temperature in Celsius from weather observations.
 
         Args:
             observations: List of daily temperatures (floats/ints), observation dicts, or models.
+            decimals: Number of decimal places to round to (default 1, use 2 for overall average).
 
         Returns:
-            Float rounded to 1 decimal place, or None if no valid temperature values exist.
+            Float rounded to specified decimal places, or None if no valid temperature values exist.
         """
         if not observations:
             logger.debug("No observations provided to AverageTemperatureCalculator")
@@ -58,8 +59,8 @@ class AverageTemperatureCalculator:
                     continue
 
         if not temps:
-            logger.debug("No valid numerical temperature entries found in observations")
+            logger.debug("No numerical temperature entries found in observations")
             return None
 
-        avg_temp = round(sum(temps) / len(temps), 1)
+        avg_temp = round(sum(temps) / len(temps), decimals)
         return avg_temp

@@ -55,7 +55,7 @@ export function WeatherStatistics({ city }) {
           duration: data.duration || duration,
         });
       }
-    } catch (_err) {
+    } catch {
       setError("Unable to retrieve historical weather data right now. Please try again.");
       setStats(null);
     } finally {
@@ -77,13 +77,24 @@ export function WeatherStatistics({ city }) {
 
   const isSuccess = stats && stats.status !== "INSUFFICIENT_HISTORICAL_DATA";
 
+  const effectivePeriod = lastCalculated ? lastCalculated.period : period;
+  const effectiveDuration = lastCalculated ? lastCalculated.duration : duration;
+  const isMonthView = effectivePeriod === "month";
+
   const avgTemp =
     stats?.average_temperature_celsius ??
     stats?.statistics?.average_temperature ??
     stats?.average_temperature;
 
+  const overallAvg =
+    stats?.overall_average_temperature_celsius ??
+    stats?.average_temperature_celsius ??
+    stats?.average_temperature;
+
   const coverageDisplay =
-    stats?.coverage_percentage != null
+    stats?.data_coverage_percentage != null
+      ? `${stats.data_coverage_percentage}%`
+      : stats?.coverage_percentage != null
       ? `${stats.coverage_percentage}%`
       : stats?.coverage_percent != null
       ? `${stats.coverage_percent}%`
@@ -204,24 +215,77 @@ export function WeatherStatistics({ city }) {
               <div className="hero-meta-row">
                 <span className="hero-period-title">Period:</span>
                 <span className="hero-period-label">
-                  {lastCalculated
-                    ? getPeriodDisplayLabel(lastCalculated.period, lastCalculated.duration)
-                    : getPeriodDisplayLabel(period, duration)}
+                  {getPeriodDisplayLabel(effectivePeriod, effectiveDuration)}
                   {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
                 </span>
               </div>
             </div>
 
-            <div className="hero-temp-display">
-              <span className="hero-temp-icon" aria-hidden="true">🌡️</span>
-              <div className="hero-temp-details">
-                <span className="hero-temp-title">Average Temperature:</span>
-                <span className="hero-temp-value">
-                  {avgTemp != null ? `${avgTemp}°C` : "N/A"}
-                </span>
-              </div>
-            </div>
+            {/* Case A: Multi-Month or Single Month Selection -> Show Monthly Breakdown + Overall Average */}
+            {isMonthView && stats.monthly_averages && stats.monthly_averages.length > 0 ? (
+              <>
+                <div className="monthly-breakdown-section" id="monthly-breakdown-section">
+                  <h4 className="monthly-breakdown-title">
+                    <span>📅</span> MONTHLY TEMPERATURE BREAKDOWN
+                  </h4>
+                  <div className="monthly-table-wrapper">
+                    <table className="monthly-breakdown-table">
+                      <thead>
+                        <tr>
+                          <th>Month</th>
+                          <th>Average Temperature</th>
+                          <th>Coverage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.monthly_averages.map((m, idx) => (
+                          <tr key={`${m.month}-${m.year || idx}`}>
+                            <td className="month-name-cell">{m.month}</td>
+                            <td className="month-temp-cell">
+                              {m.average_temperature_celsius != null
+                                ? `${m.average_temperature_celsius}°C`
+                                : "N/A"}
+                            </td>
+                            <td className="month-coverage-cell">
+                              <span
+                                className={`coverage-pill ${
+                                  (m.coverage_percentage ?? 100) >= 99 ? "full" : "partial"
+                                }`}
+                              >
+                                {m.coverage_percentage != null ? `${m.coverage_percentage}%` : "100%"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
+                {/* Highlighted Card: OVERALL N-MONTH AVERAGE */}
+                <div className="overall-average-card" id="overall-average-card">
+                  <span className="overall-card-title">
+                    OVERALL {effectiveDuration}-MONTH AVERAGE
+                  </span>
+                  <span className="overall-card-value">
+                    {overallAvg != null ? `${overallAvg}°C` : "N/A"}
+                  </span>
+                </div>
+              </>
+            ) : (
+              /* Case B: Week Selection (1 to 4 Weeks) -> Single Average Temperature display */
+              <div className="hero-temp-display" id="week-average-display">
+                <span className="hero-temp-icon" aria-hidden="true">🌡️</span>
+                <div className="hero-temp-details">
+                  <span className="hero-temp-title">Average Temperature:</span>
+                  <span className="hero-temp-value">
+                    {avgTemp != null ? `${avgTemp}°C` : "N/A"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Metadata Footer: Data Coverage & Source */}
             <div className="hero-temp-footer">
               <div className="hero-footer-item">
                 <span className="footer-label">Data Coverage:</span>

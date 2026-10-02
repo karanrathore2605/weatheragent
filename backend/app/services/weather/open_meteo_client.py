@@ -9,6 +9,7 @@ Architecture Rules:
 - Never leaks internal stack traces.
 """
 
+from datetime import datetime, timezone as dt_timezone
 from typing import Any, Dict, List, Optional
 import httpx
 
@@ -159,11 +160,28 @@ class OpenMeteoClient:
             WeatherServiceUnavailableError: On network or 5xx server errors.
             WeatherResponseParsingError: On malformed JSON or unexpected schema.
         """
+        today_str = datetime.now(dt_timezone.utc).strftime("%Y-%m-%d")
+        api_end_date = min(end_date, today_str)
+
+        if start_date > api_end_date:
+            logger.debug(
+                "Requested start_date %s is in the future compared to max historical date %s",
+                start_date,
+                api_end_date,
+            )
+            return {
+                "time": [],
+                "temperature_2m_mean": [],
+                "latitude": latitude,
+                "longitude": longitude,
+                "timezone": timezone or "auto",
+            }
+
         params = {
             "latitude": latitude,
             "longitude": longitude,
             "start_date": start_date,
-            "end_date": end_date,
+            "end_date": api_end_date,
             "daily": "temperature_2m_mean",
             "timezone": timezone or "auto",
         }
@@ -173,7 +191,7 @@ class OpenMeteoClient:
             latitude,
             longitude,
             start_date,
-            end_date,
+            api_end_date,
             timezone,
         )
 
