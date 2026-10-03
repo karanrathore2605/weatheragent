@@ -6,6 +6,11 @@ Architecture Rule:
 """
 
 from app.schemas.health import HealthResponse
+from app.schemas.monthly_report_schema import (
+    MonthlyWeatherReportRequest,
+    MonthlyWeatherReportResponse,
+    WeeklyPeriodReport,
+)
 from app.schemas.weather_schema import (
     CoverageInfo,
     ForecastDay,
@@ -21,6 +26,9 @@ from app.schemas.weather_schema import (
 __all__ = [
     "CoverageInfo",
     "HealthResponse",
+    "MonthlyWeatherReportRequest",
+    "MonthlyWeatherReportResponse",
+    "WeeklyPeriodReport",
     "WeatherResponse",
     "ForecastDay",
     "ForecastResponse",
@@ -30,3 +38,4 @@ __all__ = [
     "WeatherStatisticsRequest",
     "WeatherStatisticsResponse",
 ]
+

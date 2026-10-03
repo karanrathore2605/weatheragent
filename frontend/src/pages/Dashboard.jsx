@@ -8,6 +8,7 @@ import {
   WeatherSummaryCard,
   ForecastGrid,
   WeatherStatistics,
+  MonthlyWeatherReport,
 } from "../components";
 
 import { getCurrentWeather, getWeatherForecast } from "../services/api";
@@ -83,6 +84,7 @@ export function Dashboard() {
               />
               <ForecastGrid forecastData={forecastData} />
               <WeatherStatistics city={activeCity} />
+              <MonthlyWeatherReport defaultCity={activeCity} />
             </div>
           )}
 

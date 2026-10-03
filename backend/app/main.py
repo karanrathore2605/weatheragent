@@ -10,6 +10,7 @@ from app.config.settings import settings
 from app.database.session import init_db
 from app.routers.agent_router import router as agent_router
 from app.routers.health import router as health_router
+from app.routers.monthly_report_router import router as monthly_report_router
 from app.routers.statistics_router import router as statistics_router
 from app.routers.weather_router import router as weather_router
 from app.utils.logger import get_logger, setup_logging
@@ -63,6 +64,7 @@ def create_application() -> FastAPI:
     app.include_router(weather_router, prefix="/api/v1")
     app.include_router(statistics_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")
+    app.include_router(monthly_report_router, prefix="/api/v1")
 
     @app.get("/", tags=["Root"])
     def root():
@@ -78,6 +80,7 @@ def create_application() -> FastAPI:
             "statistics": "/api/v1/weather/statistics",
             "summary": "/api/v1/weather/statistics/summary",
             "agent": "/api/v1/agent/query",
+            "monthly_report": "/api/v1/weather/report/monthly",
         }
 
     return app

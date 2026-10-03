@@ -121,6 +121,24 @@ export async function getWeatherSummary(city, periodType = "week", duration = 1)
   );
 }
 
+/**
+ * Fetch Monthly Weather Report with weekly averages and AI professional summary.
+ * Calls GET /api/v1/weather/report/monthly?city=...&month=...
+ */
+export async function getMonthlyWeatherReport(city, month = "August 2026", year = null) {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  let query = `/api/v1/weather/report/monthly?city=${encodeURIComponent(city.trim())}`;
+  if (month) {
+    query += `&month=${encodeURIComponent(month.trim())}`;
+  }
+  if (year) {
+    query += `&year=${encodeURIComponent(year)}`;
+  }
+  return request(query);
+}
+
 export default {
   getHealthStatus,
   getRootInfo,
@@ -128,5 +146,7 @@ export default {
   getWeatherForecast,
   getWeatherStatistics,
   getWeatherSummary,
+  getMonthlyWeatherReport,
 };
+
 

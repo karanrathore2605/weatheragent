@@ -1,13 +1,15 @@
 """LLM Service responsible for natural language generation and meteorological summarization."""
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.clients.groq_client import BaseLLMClient, GroqClient, LLMClientError
 from app.prompts.weather_prompts import (
     CURRENT_WEATHER_SUMMARY_SYSTEM_PROMPT,
+    MONTHLY_REPORT_SUMMARY_SYSTEM_PROMPT,
     WEATHER_SUMMARY_SYSTEM_PROMPT,
     format_current_weather_payload,
+    format_monthly_report_payload,
     format_weather_summary_payload,
 )
 from app.utils.logger import get_logger
@@ -130,6 +132,70 @@ class LLMService:
             return None
         except Exception as exc:
             logger.exception("Unexpected error during current weather LLM generation for city='%s': %s", city, exc)
+            if raise_on_error:
+                raise LLMClientError(f"Unexpected LLM generation error: {exc}") from exc
+            return None
+
+    def generate_monthly_report_summary(
+        self,
+        city: str,
+        month: str,
+        weekly_averages: List[Dict[str, Any]],
+        highest_week: Optional[Dict[str, Any]] = None,
+        lowest_week: Optional[Dict[str, Any]] = None,
+        pattern_hint: Optional[str] = None,
+        raise_on_error: bool = False,
+    ) -> Optional[str]:
+        """Generate a concise, professional summary for a Monthly Weather Report using Groq.
+
+        Operating Rules:
+        - LLM does NOT calculate averages.
+        - Relies strictly on provided calculated weekly data.
+        - Mentions city, month, highest weekly average, lowest weekly average, and general temperature pattern.
+        - 2-4 sentences.
+        """
+        if not weekly_averages:
+            logger.warning("No weekly averages provided for monthly report summary; skipping.")
+            return None
+
+        payload = format_monthly_report_payload(
+            city=city,
+            month=month,
+            weekly_averages=weekly_averages,
+            highest_week=highest_week,
+            lowest_week=lowest_week,
+            pattern_hint=pattern_hint,
+        )
+
+        try:
+            raw_summary = self.client.generate_completion(
+                system_prompt=MONTHLY_REPORT_SUMMARY_SYSTEM_PROMPT,
+                user_content=payload,
+            )
+
+            cleaned = self._clean_llm_output(raw_summary)
+            if not cleaned:
+                logger.warning("Sanitized monthly report LLM output is empty.")
+                return None
+
+            return cleaned
+
+        except LLMClientError as exc:
+            logger.warning(
+                "LLM generation failed for monthly report summary city='%s', month='%s': %s",
+                city,
+                month,
+                exc,
+            )
+            if raise_on_error:
+                raise
+            return None
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error during monthly report LLM generation for city='%s': %s",
+                city,
+                exc,
+            )
             if raise_on_error:
                 raise LLMClientError(f"Unexpected LLM generation error: {exc}") from exc
             return None

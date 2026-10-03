@@ -1,7 +1,7 @@
 """Prompt templates and structured formatting for meteorological summarization."""
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 WEATHER_SUMMARY_SYSTEM_PROMPT = """You are a professional weather information summarization assistant.
 Create a concise, natural weather summary from the provided calculated data.
@@ -195,4 +195,68 @@ def format_current_weather_payload(
         "Generate a concise, professional meteorological summary based strictly on these current observations. "
         "Do not include conversational filler, chatbot language, or emojis."
     )
+
+
+MONTHLY_REPORT_SUMMARY_SYSTEM_PROMPT = """You are a professional weather reporting assistant.
+
+Create a concise and professional summary based ONLY on the
+provided calculated weekly weather data.
+
+Mention:
+- selected city
+- selected month
+- highest weekly average
+- lowest weekly average
+- general temperature pattern
+
+Do not calculate any values yourself.
+Do not invent weather information.
+Do not repeat the complete table.
+Keep the summary to 2-4 sentences.
+Use professional language suitable for a weather report."""
+
+
+def format_monthly_report_payload(
+    city: str,
+    month: str,
+    weekly_averages: List[Dict[str, Any]],
+    highest_week: Optional[Dict[str, Any]] = None,
+    lowest_week: Optional[Dict[str, Any]] = None,
+    pattern_hint: Optional[str] = None,
+) -> str:
+    """Format calculated weekly results into an injection-safe structured prompt for Groq."""
+    weekly_lines = []
+    for item in weekly_averages:
+        w_name = item.get("week")
+        d_range = item.get("date_range")
+        avg = item.get("average_temperature")
+        if avg is not None:
+            weekly_lines.append(f"- {w_name} ({d_range}): {avg}°C")
+        else:
+            weekly_lines.append(f"- {w_name} ({d_range}): Data unavailable")
+
+    extremes_lines = []
+    if highest_week:
+        extremes_lines.append(
+            f"- Highest weekly average: {highest_week.get('average_temperature')}°C during {highest_week.get('week')}"
+        )
+    if lowest_week:
+        extremes_lines.append(
+            f"- Lowest weekly average: {lowest_week.get('average_temperature')}°C during {lowest_week.get('week')}"
+        )
+    if pattern_hint:
+        extremes_lines.append(f"- General temperature pattern: {pattern_hint}")
+
+    content = (
+        f"Calculated Weather Data for Monthly Weather Report:\n"
+        f"City: {city}\n"
+        f"Month: {month}\n\n"
+        f"Weekly Average Temperatures:\n" + "\n".join(weekly_lines) + "\n\n"
+        f"Pre-Calculated Extremes & Metrics:\n" + "\n".join(extremes_lines) + "\n\n"
+        "Create a concise and professional summary based ONLY on this calculated data. "
+        "Mention the selected city, selected month, highest weekly average, lowest weekly average, and general temperature pattern. "
+        "Keep the summary to 2-4 sentences using professional meteorological language."
+    )
+    return content
+
 
