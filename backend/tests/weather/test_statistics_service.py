@@ -424,9 +424,10 @@ def test_week_calculation_remains_unchanged(
     assert res.observation_days == 7
     assert res.coverage_percentage == 100.0
     assert res.average_temperature_celsius == 29.9
-    # Week MUST NOT have monthly averages breakdown
+    # Week MUST NOT have monthly averages breakdown, but MUST have daily breakdown
     assert res.monthly_averages is None
-    assert res.overall_average_temperature_celsius is None
+    assert res.daily_records is not None
+    assert len(res.daily_records) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -459,3 +460,372 @@ def test_correct_api_response_mapping(
     assert payload["overall_average_temperature_celsius"] == 30.0
     assert payload["total_observation_days"] == expected_days
     assert payload["data_coverage_percentage"] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Current Month Skipped When Under 90% Coverage (User Prompt Example)
+# ---------------------------------------------------------------------------
+def test_current_month_skipped_when_under_90_percent(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Current date: 2026-10-03, User selects: 4 Months.
+    October coverage: 9.7% (3 observations / 31 days).
+    Because 9.7% < 90%: SKIP October.
+    Select: June, July, August, September (exactly 4 complete months).
+    Final calculation: June + July + August + September.
+    """
+    ref_date = date(2026, 10, 3)
+
+    # Provide data for June (30d), July (31d), August (31d), September (30d), and 3 days of October
+    dates: list[str] = []
+    temps: list[float] = []
+
+    # June: 30 days @ 29.1
+    for d in range(1, 31):
+        dates.append(f"2026-06-{d:02d}")
+        temps.append(29.1)
+    # July: 31 days @ 26.7
+    for d in range(1, 32):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(26.7)
+    # August: 31 days @ 25.2
+    for d in range(1, 32):
+        dates.append(f"2026-08-{d:02d}")
+        temps.append(25.2)
+    # September: 30 days @ 25.3
+    for d in range(1, 31):
+        dates.append(f"2026-09-{d:02d}")
+        temps.append(25.3)
+    # October: 3 days @ 26.8 (9.7% coverage)
+    for d in range(1, 4):
+        dates.append(f"2026-10-{d:02d}")
+        temps.append(26.8)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Bhopal",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Bhopal", "month", duration=4, reference_date=ref_date)
+
+    assert res.status == "SUCCESS"
+    assert res.city == "Bhopal"
+    assert res.duration == 4
+
+    # Must contain exactly 4 qualifying months
+    assert len(res.monthly_averages) == 4
+
+    # Must be June, July, August, September (October must NOT be included)
+    month_names = [m.month for m in res.monthly_averages]
+    assert month_names == ["June", "July", "August", "September"]
+    assert "October" not in month_names
+
+    # Check each month
+    assert res.monthly_averages[0].month == "June"
+    assert res.monthly_averages[0].average_temperature_celsius == 29.1
+    assert res.monthly_averages[0].observation_days == 30
+    assert res.monthly_averages[0].coverage_percentage == 100.0
+
+    assert res.monthly_averages[1].month == "July"
+    assert res.monthly_averages[1].average_temperature_celsius == 26.7
+    assert res.monthly_averages[1].observation_days == 31
+    assert res.monthly_averages[1].coverage_percentage == 100.0
+
+    assert res.monthly_averages[2].month == "August"
+    assert res.monthly_averages[2].average_temperature_celsius == 25.2
+    assert res.monthly_averages[2].observation_days == 31
+    assert res.monthly_averages[2].coverage_percentage == 100.0
+
+    assert res.monthly_averages[3].month == "September"
+    assert res.monthly_averages[3].average_temperature_celsius == 25.3
+    assert res.monthly_averages[3].observation_days == 30
+    assert res.monthly_averages[3].coverage_percentage == 100.0
+
+    # Start date and end date must match selected months
+    assert res.start_date == "2026-06-01"
+    assert res.end_date == "2026-09-30"
+
+    # Total days: 30 + 31 + 31 + 30 = 122
+    assert res.total_observation_days == 122
+    assert res.data_coverage_percentage == 100.0
+
+    # Overall average: (30*29.1 + 31*26.7 + 31*25.2 + 30*25.3) / 122
+    # = (873.0 + 827.7 + 781.2 + 759.0) / 122 = 3240.9 / 122 = 26.5647... -> 26.56
+    assert res.overall_average_temperature_celsius == 26.56
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Current Month Included When >= 90% Coverage (User Prompt Example 2)
+# ---------------------------------------------------------------------------
+def test_current_month_included_when_over_90_percent(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """If October coverage is >= 90% (e.g. 30 observations out of 31 = 96.8%):
+    October -> INCLUDE
+    September -> INCLUDE
+    August -> INCLUDE
+    July -> INCLUDE
+    Final calculation: July + August + September + October (exactly 4 months).
+    """
+    ref_date = date(2026, 10, 30)
+
+    dates: list[str] = []
+    temps: list[float] = []
+
+    # July: 31 days @ 26.7
+    for d in range(1, 32):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(26.7)
+    # August: 31 days @ 25.2
+    for d in range(1, 32):
+        dates.append(f"2026-08-{d:02d}")
+        temps.append(25.2)
+    # September: 30 days @ 25.3
+    for d in range(1, 31):
+        dates.append(f"2026-09-{d:02d}")
+        temps.append(25.3)
+    # October: 30 days @ 27.0 (Coverage = 30/31 = 96.8% >= 90%)
+    for d in range(1, 31):
+        dates.append(f"2026-10-{d:02d}")
+        temps.append(27.0)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Bhopal",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Bhopal", "month", duration=4, reference_date=ref_date)
+
+    assert res.status == "SUCCESS"
+    assert res.duration == 4
+    assert len(res.monthly_averages) == 4
+
+    month_names = [m.month for m in res.monthly_averages]
+    assert month_names == ["July", "August", "September", "October"]
+
+    assert res.start_date == "2026-07-01"
+    assert res.end_date == "2026-10-31"
+
+
+# ---------------------------------------------------------------------------
+# Test 15: 1 Month Duration with < 90% Current Month
+# ---------------------------------------------------------------------------
+def test_1_month_selects_previous_complete_month_when_under_90_percent(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """User selects 1 Month when current month < 90%:
+    -> selects previous complete month (September).
+    """
+    ref_date = date(2026, 10, 3)
+
+    dates: list[str] = []
+    temps: list[float] = []
+
+    # September: 30 days @ 25.3
+    for d in range(1, 31):
+        dates.append(f"2026-09-{d:02d}")
+        temps.append(25.3)
+    # October: 3 days @ 26.8
+    for d in range(1, 4):
+        dates.append(f"2026-10-{d:02d}")
+        temps.append(26.8)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Bhopal",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Bhopal", "month", duration=1, reference_date=ref_date)
+
+    assert res.status == "SUCCESS"
+    assert res.duration == 1
+    assert len(res.monthly_averages) == 1
+    assert res.monthly_averages[0].month == "September"
+    assert res.monthly_averages[0].average_temperature_celsius == 25.3
+    assert res.start_date == "2026-09-01"
+    assert res.end_date == "2026-09-30"
+
+
+# ---------------------------------------------------------------------------
+# Test 16: 3 Months Duration with < 90% Current Month
+# ---------------------------------------------------------------------------
+def test_3_months_selects_previous_3_complete_months(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """User selects 3 Months when current month < 90%:
+    -> selects July, August, September.
+    """
+    ref_date = date(2026, 10, 3)
+
+    dates: list[str] = []
+    temps: list[float] = []
+
+    for d in range(1, 32):
+        dates.append(f"2026-07-{d:02d}")
+        temps.append(26.7)
+    for d in range(1, 32):
+        dates.append(f"2026-08-{d:02d}")
+        temps.append(25.2)
+    for d in range(1, 31):
+        dates.append(f"2026-09-{d:02d}")
+        temps.append(25.3)
+    for d in range(1, 4):
+        dates.append(f"2026-10-{d:02d}")
+        temps.append(26.8)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Bhopal",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Bhopal", "month", duration=3, reference_date=ref_date)
+
+    assert res.status == "SUCCESS"
+    assert res.duration == 3
+    assert len(res.monthly_averages) == 3
+    assert [m.month for m in res.monthly_averages] == ["July", "August", "September"]
+    assert res.start_date == "2026-07-01"
+    assert res.end_date == "2026-09-30"
+    assert res.overall_average_temperature_celsius == 25.74
+
+
+# ---------------------------------------------------------------------------
+# Test 17: Week Duration Validation (1, 2, 3 Allowed; 4 and Others Rejected)
+# ---------------------------------------------------------------------------
+def test_week_duration_validation(service: StatisticsService) -> None:
+    """Week period must support ONLY 1, 2, 3 weeks; 4 weeks is rejected."""
+    from app.schemas.weather_schema import StatisticsPeriod
+
+    assert service.validate_period_value(StatisticsPeriod.WEEK, 1) == 1
+    assert service.validate_period_value(StatisticsPeriod.WEEK, 2) == 2
+    assert service.validate_period_value(StatisticsPeriod.WEEK, 3) == 3
+
+    with pytest.raises(ValueError, match="Invalid week duration: 4"):
+        service.validate_period_value(StatisticsPeriod.WEEK, 4)
+
+    with pytest.raises(ValueError, match="Invalid week duration: 0"):
+        service.validate_period_value(StatisticsPeriod.WEEK, 0)
+
+    with pytest.raises(ValueError, match="Invalid week duration: 5"):
+        service.validate_period_value(StatisticsPeriod.WEEK, 5)
+
+
+# ---------------------------------------------------------------------------
+# Test 18: Week Date Range Mapping (1 -> 7d, 2 -> 14d, 3 -> 21d)
+# ---------------------------------------------------------------------------
+def test_week_date_range_mapping(service: StatisticsService) -> None:
+    """1 Week = 7 days, 2 Weeks = 14 days, 3 Weeks = 21 days."""
+    ref_date = date(2026, 10, 3)
+
+    s1, e1, days1 = service.get_date_range("week", 1, ref_date)
+    assert days1 == 7
+    assert s1 == date(2026, 9, 26)
+    assert e1 == date(2026, 10, 3)
+
+    s2, e2, days2 = service.get_date_range("week", 2, ref_date)
+    assert days2 == 14
+    assert s2 == date(2026, 9, 19)
+    assert e2 == date(2026, 10, 3)
+
+    s3, e3, days3 = service.get_date_range("week", 3, ref_date)
+    assert days3 == 21
+    assert s3 == date(2026, 9, 12)
+    assert e3 == date(2026, 10, 3)
+
+    with pytest.raises(ValueError, match="Invalid week duration: 4"):
+        service.get_date_range("week", 4, ref_date)
+
+
+# ---------------------------------------------------------------------------
+# Test 19: 3 Weeks Historical Calculation
+# ---------------------------------------------------------------------------
+def test_three_weeks_calculation(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Test 3 Weeks duration calculates pure average across 21 days without monthly breakdown."""
+    ref_date = date(2026, 10, 3)
+    start_date, end_date, expected_days = service.get_date_range("week", 3, ref_date)
+    assert expected_days == 21
+
+    temps = [25.0 + (i % 5) * 0.5 for i in range(21)]
+    dates = [str(start_date + timedelta(days=i)) for i in range(21)]
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Bhopal",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Bhopal", "week", duration=3, reference_date=ref_date)
+    assert res.status == "SUCCESS"
+    assert res.duration == 3
+    assert res.period_type == "week"
+    assert res.start_date == "2026-09-12"
+    assert res.end_date == "2026-10-03"
+    assert res.observation_days == 21
+    assert res.average_temperature_celsius is not None
+    assert res.monthly_averages is None
+    assert res.daily_records is not None
+    assert len(res.daily_records) == 22
+
+
+# ---------------------------------------------------------------------------
+# Test 20: Week Daily Temperature Breakdown & Overall Average Calculation
+# ---------------------------------------------------------------------------
+def test_week_daily_temperature_breakdown(
+    service: StatisticsService, mock_historical_service: MagicMock
+) -> None:
+    """Test 2 Weeks analysis returns daily temperature breakdown and calculates pure average."""
+    ref_date = date(2026, 10, 3)
+    start_date, end_date, expected_days = service.get_date_range("week", 2, ref_date)
+    assert start_date == date(2026, 9, 19)
+    assert end_date == date(2026, 10, 3)
+
+    # 15 days from Sep 19 to Oct 03, with one missing day (Sep 22)
+    dates = []
+    temps = []
+    curr = start_date
+    while curr <= end_date:
+        d_str = curr.isoformat()
+        dates.append(d_str)
+        if d_str == "2026-09-22":
+            temps.append(None)  # missing
+        else:
+            temps.append(27.0)
+        curr += timedelta(days=1)
+
+    mock_historical_service.fetch_historical_temperatures.return_value = {
+        "city": "Indore",
+        "dates": dates,
+        "temperatures": temps,
+    }
+
+    res = service.calculate_average_weather("Indore", "week", duration=2, reference_date=ref_date)
+    assert res.status == "SUCCESS"
+    assert res.period_type == "week"
+    assert res.duration == 2
+    assert res.daily_records is not None
+    assert len(res.daily_records) == 15
+
+    # Check Sep 19
+    r_sep19 = next(r for r in res.daily_records if r.date == "2026-09-19")
+    assert r_sep19.formatted_date == "Sep 19"
+    assert r_sep19.average_temperature_celsius == 27.0
+    assert r_sep19.status == "100%"
+
+    # Check missing Sep 22
+    r_sep22 = next(r for r in res.daily_records if r.date == "2026-09-22")
+    assert r_sep22.formatted_date == "Sep 22"
+    assert r_sep22.average_temperature_celsius is None
+    assert r_sep22.status == "Missing"
+
+    # Overall average is computed only from valid daily temperatures (14 observations)
+    assert res.observation_days == 14
+    assert res.average_temperature_celsius == 27.0
+
+
+

@@ -5,7 +5,6 @@ const WEEK_DURATIONS = [
   { value: 1, label: "1 Week" },
   { value: 2, label: "2 Weeks" },
   { value: 3, label: "3 Weeks" },
-  { value: 4, label: "4 Weeks" },
 ];
 
 const MONTH_DURATIONS = [
@@ -213,12 +212,35 @@ export function WeatherStatistics({ city }) {
                 <span className="hero-city-name">{lastCalculated ? lastCalculated.city : city}</span>
               </div>
               <div className="hero-meta-row">
-                <span className="hero-period-title">Period:</span>
+                <span className="hero-period-title">Analysis Period:</span>
+                <span className="hero-period-label">{effectivePeriod === "week" ? "Week" : "Month"}</span>
+              </div>
+              <div className="hero-meta-row">
+                <span className="hero-period-title">Duration:</span>
                 <span className="hero-period-label">
-                  {getPeriodDisplayLabel(effectivePeriod, effectiveDuration)}
-                  {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
+                  {effectivePeriod === "week"
+                    ? `${effectiveDuration} Week${effectiveDuration > 1 ? "s" : ""}`
+                    : `${effectiveDuration} Month${effectiveDuration > 1 ? "s" : ""}`}
                 </span>
               </div>
+              {effectivePeriod === "week" ? (
+                <div className="hero-meta-row">
+                  <span className="hero-period-title">Period:</span>
+                  <span className="hero-period-label">
+                    {getPeriodDisplayLabel(effectivePeriod, effectiveDuration)}
+                    {stats.start_date && stats.end_date && ` (${stats.start_date} to ${stats.end_date})`}
+                  </span>
+                </div>
+              ) : (
+                stats.monthly_averages && stats.monthly_averages.length > 0 && (
+                  <div className="hero-meta-row">
+                    <span className="hero-period-title">Selected Months:</span>
+                    <span className="hero-period-label hero-months-highlight">
+                      {stats.monthly_averages.map((m) => m.month).join(", ")}
+                    </span>
+                  </div>
+                )
+              )}
             </div>
 
             {/* Case A: Multi-Month or Single Month Selection -> Show Monthly Breakdown + Overall Average */}
@@ -262,7 +284,7 @@ export function WeatherStatistics({ city }) {
                   </div>
                 </div>
 
-                {/* Highlighted Card: OVERALL N-MONTH AVERAGE */}
+                {/* Highlighted Card: OVERALL AVERAGE TEMPERATURE */}
                 <div className="overall-average-card" id="overall-average-card">
                   <span className="overall-card-title">
                     OVERALL {effectiveDuration}-MONTH AVERAGE
@@ -270,19 +292,75 @@ export function WeatherStatistics({ city }) {
                   <span className="overall-card-value">
                     {overallAvg != null ? `${overallAvg}°C` : "N/A"}
                   </span>
+                  {stats.monthly_averages && stats.monthly_averages.length > 0 && (
+                    <div className="selected-months-container" id="selected-months-container">
+                      <span className="selected-months-heading">Selected Months:</span>
+                      <span className="selected-months-values">
+                        {stats.monthly_averages.map((m) => m.month).join(", ")}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
-              /* Case B: Week Selection (1 to 4 Weeks) -> Single Average Temperature display */
-              <div className="hero-temp-display" id="week-average-display">
-                <span className="hero-temp-icon" aria-hidden="true">🌡️</span>
-                <div className="hero-temp-details">
-                  <span className="hero-temp-title">Average Temperature:</span>
-                  <span className="hero-temp-value">
+              /* Case B: Week Selection (1 to 3 Weeks) -> Daily Breakdown Table + Overall Average */
+              <>
+                {stats.daily_records && stats.daily_records.length > 0 && (
+                  <div className="daily-breakdown-section" id="daily-breakdown-section">
+                    <h4 className="daily-breakdown-title">
+                      <span>📅</span> DAILY TEMPERATURE BREAKDOWN
+                    </h4>
+                    <div className="daily-table-wrapper">
+                      <table className="daily-breakdown-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Average Temperature</th>
+                            <th>Coverage</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stats.daily_records.map((r, idx) => (
+                            <tr key={`${r.date}-${idx}`}>
+                              <td className="daily-date-cell">
+                                {r.formatted_date || r.date}
+                              </td>
+                              <td className="daily-temp-cell">
+                                {r.average_temperature_celsius != null
+                                  ? `${r.average_temperature_celsius}°C`
+                                  : "--"}
+                              </td>
+                              <td className="daily-coverage-cell">
+                                <span
+                                  className={`coverage-pill ${
+                                    r.status === "Missing"
+                                      ? "missing"
+                                      : (r.coverage_percentage ?? 100) >= 99
+                                      ? "full"
+                                      : "partial"
+                                  }`}
+                                >
+                                  {r.status || (r.coverage_percentage != null ? `${r.coverage_percentage}%` : "100%")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Highlighted Card: OVERALL N-WEEK AVERAGE */}
+                <div className="overall-average-card" id="overall-week-average-card">
+                  <span className="overall-card-title">
+                    OVERALL {effectiveDuration}-WEEK AVERAGE
+                  </span>
+                  <span className="overall-card-value">
                     {avgTemp != null ? `${avgTemp}°C` : "N/A"}
                   </span>
                 </div>
-              </div>
+              </>
             )}
 
             {/* Metadata Footer: Data Coverage & Source */}

@@ -26,17 +26,19 @@ logger = get_logger(__name__)
 
 
 class OpenMeteoClient:
-    """Client for Open-Meteo Geocoding and Historical Archive APIs."""
+    """Client for Open-Meteo Geocoding and Historical Forecast/Archive APIs."""
 
     def __init__(
         self,
         timeout: float = 10.0,
         geocoding_base_url: str = "https://geocoding-api.open-meteo.com/v1/search",
-        archive_base_url: str = "https://archive-api.open-meteo.com/v1/archive",
+        archive_base_url: str = "https://historical-forecast-api.open-meteo.com/v1/forecast",
+        historical_weather_base_url: str = "https://archive-api.open-meteo.com/v1/archive",
     ) -> None:
         self.timeout = timeout
         self.geocoding_base_url = geocoding_base_url.rstrip("/")
         self.archive_base_url = archive_base_url.rstrip("/")
+        self.historical_weather_base_url = historical_weather_base_url.rstrip("/")
         # In-memory geocoding cache: city_lower -> location dict
         self._location_cache: Dict[str, Dict[str, Any]] = {}
 

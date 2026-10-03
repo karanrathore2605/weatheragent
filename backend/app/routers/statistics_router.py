@@ -44,7 +44,7 @@ def get_statistics_service(db: Session = Depends(get_db)) -> StatisticsService:
     response_model=WeatherStatisticsResponse,
     status_code=status.HTTP_200_OK,
     summary="Get Historical Weather Statistics",
-    description="Compute average temperature for a city over 1-4 weeks or 1-12 months via Open-Meteo Historical Weather API.",
+    description="Compute average temperature for a city over 1-3 weeks or 1-12 months via Open-Meteo Historical Weather API.",
     responses={
         200: {
             "model": WeatherStatisticsResponse,
@@ -76,7 +76,7 @@ def get_weather_statistics_endpoint(
     ),
     duration: Optional[int] = Query(
         default=None,
-        description="Duration integer (1-4 for week; 1-12 for month)",
+        description="Duration integer (1-3 for week; 1-12 for month)",
         examples=[1],
     ),
     period_value: Optional[int] = Query(
@@ -116,10 +116,10 @@ def get_weather_statistics_endpoint(
             detail=f"Invalid statistics period '{effective_period}'. Supported periods: week, month.",
         )
 
-    if effective_period == "week" and effective_duration not in (1, 2, 3, 4):
+    if effective_period == "week" and effective_duration not in (1, 2, 3):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid week duration: {effective_duration}. Supported durations for week: 1, 2, 3, or 4 weeks.",
+            detail=f"Invalid week duration: {effective_duration}. Supported durations for week: 1, 2, or 3 weeks.",
         )
 
     if effective_period == "month" and effective_duration not in tuple(range(1, 13)):

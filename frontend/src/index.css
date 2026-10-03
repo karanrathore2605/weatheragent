@@ -1043,6 +1043,7 @@ body {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .hero-city-title,
@@ -1063,6 +1064,11 @@ body {
   font-size: 0.95rem;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+.hero-months-highlight {
+  color: #38bdf8;
+  font-weight: 600;
 }
 
 .hero-footer-item {
@@ -1232,6 +1238,93 @@ body {
   border: 1px solid rgba(251, 191, 36, 0.3);
 }
 
+.coverage-pill.missing {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* Daily Breakdown Table for Week Analysis */
+.daily-breakdown-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.daily-breakdown-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.daily-table-wrapper {
+  background: rgba(10, 14, 23, 0.55);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow-y: auto;
+  max-height: 380px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.daily-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.daily-breakdown-table th {
+  background: rgba(15, 23, 42, 0.95);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.75rem 1.25rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.daily-breakdown-table td {
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.daily-breakdown-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.daily-breakdown-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.daily-date-cell {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.daily-temp-cell {
+  font-weight: 700;
+  color: #38bdf8;
+  font-family: var(--font-main);
+  font-size: 0.95rem;
+}
+
+.daily-coverage-cell {
+  font-size: 0.85rem;
+}
+
 /* Overall Highlighted Card */
 .overall-average-card {
   background: linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(15, 23, 42, 0.95) 100%);
@@ -1271,6 +1364,29 @@ body {
   -webkit-text-fill-color: transparent;
   line-height: 1.1;
   font-family: var(--font-main);
+}
+
+.selected-months-container {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.selected-months-heading {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.selected-months-values {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #38bdf8;
+  letter-spacing: 0.02em;
 }
 
 /* Footer */

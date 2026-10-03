@@ -88,7 +88,7 @@ class WeatherStatisticsRequest(BaseModel):
         default=1,
         ge=1,
         le=12,
-        description="Period duration value (1-4 for week; 1-12 for month)",
+        description="Period duration value (1-3 for week; 1-12 for month)",
         examples=[1],
     )
     period_value: Optional[int] = Field(
@@ -111,19 +111,33 @@ class MonthlyAverage(BaseModel):
     end_date: Optional[str] = Field(None, description="End date of this calendar month", examples=["2026-06-30"])
 
 
+class DailyRecord(BaseModel):
+    """Daily historical temperature observation record for week analysis."""
+
+    date: str = Field(..., description="Observation date (YYYY-MM-DD)", examples=["2026-09-19"])
+    formatted_date: Optional[str] = Field(None, description="Formatted display date (e.g. 'Sep 19')", examples=["Sep 19"])
+    average_temperature_celsius: Optional[float] = Field(None, description="Average daily temperature in Celsius", examples=[27.1])
+    coverage_percentage: Optional[float] = Field(None, description="Observation data coverage percentage for this day", examples=[100.0])
+    status: str = Field("100%", description="Observation status or coverage string ('100%', 'Missing', 'Partial')", examples=["100%"])
+
+
 class WeatherStatisticsResponse(BaseModel):
     """Structured response payload for weather statistics with monthly breakdown."""
 
     city: str = Field(..., description="Target city name", examples=["Mumbai"])
     provider: str = Field("Open-Meteo", description="Weather data provider identifier", examples=["Open-Meteo"])
     period_type: str = Field("month", description="Statistical aggregation period ('week' or 'month')", examples=["month"])
-    duration: int = Field(1, description="Period duration value (1-4 for week; 1-12 for month)", examples=[5])
+    duration: int = Field(1, description="Period duration value (1-3 for week; 1-12 for month)", examples=[5])
     period_value: int = Field(1, description="Period duration value alias", examples=[5])
     start_date: Optional[str] = Field(None, description="Start date of aggregation window in YYYY-MM-DD format", examples=["2026-06-01"])
     end_date: Optional[str] = Field(None, description="End date of aggregation window in YYYY-MM-DD format", examples=["2026-10-31"])
 
     # Monthly breakdown for multi-month requests
     monthly_averages: Optional[List[MonthlyAverage]] = Field(None, description="Month-by-month temperature breakdown for multi-month periods")
+
+    # Daily breakdown for week requests
+    daily_records: Optional[List[DailyRecord]] = Field(None, description="Day-by-day temperature breakdown for week analysis periods")
+    daily_breakdown: Optional[List[DailyRecord]] = Field(None, description="Alias for daily_records")
 
     # Overall temperature metrics
     overall_average_temperature_celsius: Optional[float] = Field(None, description="Overall average temperature in Celsius across the complete period", examples=[28.36])

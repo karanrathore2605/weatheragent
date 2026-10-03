@@ -132,7 +132,13 @@ def test_get_statistics_invalid_period(client: TestClient) -> None:
 
 
 def test_get_statistics_invalid_duration(client: TestClient) -> None:
-    """Test duration validation in router: week supports 1-4, month supports 1-12."""
+    """Test duration validation in router: week supports 1-3, month supports 1-12."""
+    # Week: 4 is now invalid (only 1, 2, 3 allowed)
+    response = client.get("/api/v1/weather/statistics?city=Indore&period_type=week&duration=4")
+    assert response.status_code == 400
+    assert "Invalid week duration" in response.json()["detail"]
+    assert "Supported durations for week: 1, 2, or 3 weeks." in response.json()["detail"]
+
     # Week: 5 is invalid
     response = client.get("/api/v1/weather/statistics?city=Indore&period_type=week&duration=5")
     assert response.status_code == 400
