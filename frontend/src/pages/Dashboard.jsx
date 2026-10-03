@@ -83,8 +83,7 @@ export function Dashboard() {
                 loading={loading}
               />
               <ForecastGrid forecastData={forecastData} />
-              <WeatherStatistics city={activeCity} />
-              <MonthlyWeatherReport defaultCity={activeCity} />
+              <MonthlyWeatherReport city={activeCity} />
             </div>
           )}
 

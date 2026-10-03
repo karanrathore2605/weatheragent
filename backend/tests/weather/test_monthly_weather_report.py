@@ -1,6 +1,5 @@
 """Tests for Monthly Weather Report calculations, LLM summarization, and API endpoints."""
 
-import calendar
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
@@ -13,7 +12,7 @@ from app.services.weekly_calculation_service import WeeklyCalculationResult, Wee
 
 
 # ==============================================================================
-# Unit Tests: Month Parsing & Weekly Periods
+# Unit Tests: Month Parsing & Weekly Periods (Strictly 4 Weeks)
 # ==============================================================================
 
 def test_parse_month_and_year_valid():
@@ -42,58 +41,55 @@ def test_parse_month_and_year_invalid():
 
 
 def test_get_month_weekly_periods_31_days():
-    """Verify August (31 days) divides into Week 1-4 and Remaining Days (Aug 29 - Aug 31)."""
+    """Verify August divides into strictly 4 weeks (Aug 1-7, 8-14, 15-21, 22-28)."""
     periods = WeeklyCalculationService.get_month_weekly_periods(2026, 8)
-    assert len(periods) == 5
+    assert len(periods) == 4
 
     assert periods[0]["week"] == "Week 1"
-    assert periods[0]["date_range"] == "Aug 1 - Aug 7"
+    assert "Aug 1" in periods[0]["date_range"] and "Aug 7" in periods[0]["date_range"]
     assert periods[0]["expected_days"] == 7
 
     assert periods[1]["week"] == "Week 2"
-    assert periods[1]["date_range"] == "Aug 8 - Aug 14"
+    assert "Aug 8" in periods[1]["date_range"] and "Aug 14" in periods[1]["date_range"]
     assert periods[1]["expected_days"] == 7
 
     assert periods[2]["week"] == "Week 3"
-    assert periods[2]["date_range"] == "Aug 15 - Aug 21"
+    assert "Aug 15" in periods[2]["date_range"] and "Aug 21" in periods[2]["date_range"]
     assert periods[2]["expected_days"] == 7
 
     assert periods[3]["week"] == "Week 4"
-    assert periods[3]["date_range"] == "Aug 22 - Aug 28"
+    assert "Aug 22" in periods[3]["date_range"] and "Aug 28" in periods[3]["date_range"]
     assert periods[3]["expected_days"] == 7
 
-    # Remaining days must NOT be called Week 5
-    assert periods[4]["week"] == "Remaining Days"
-    assert periods[4]["date_range"] == "Aug 29 - Aug 31"
-    assert periods[4]["expected_days"] == 3
+    week_names = [p["week"] for p in periods]
+    assert "Remaining Days" not in week_names
+    assert "Week 5" not in week_names
 
 
 def test_get_month_weekly_periods_30_days():
-    """Verify September (30 days) divides into Week 1-4 and Remaining Days (Sep 29 - Sep 30)."""
+    """Verify September divides into strictly 4 weeks (no remaining days)."""
     periods = WeeklyCalculationService.get_month_weekly_periods(2026, 9)
-    assert len(periods) == 5
-    assert periods[4]["week"] == "Remaining Days"
-    assert periods[4]["date_range"] == "Sep 29 - Sep 30"
-    assert periods[4]["expected_days"] == 2
+    assert len(periods) == 4
+    week_names = [p["week"] for p in periods]
+    assert "Remaining Days" not in week_names
+    assert periods[3]["week"] == "Week 4"
 
 
 def test_get_month_weekly_periods_28_days_non_leap():
-    """Verify February in non-leap year (28 days) has NO remaining days."""
+    """Verify February has strictly 4 weeks."""
     periods = WeeklyCalculationService.get_month_weekly_periods(2025, 2)
     assert len(periods) == 4
     week_names = [p["week"] for p in periods]
     assert "Remaining Days" not in week_names
     assert "Week 5" not in week_names
-    assert periods[3]["date_range"] == "Feb 22 - Feb 28"
 
 
 def test_get_month_weekly_periods_29_days_leap():
-    """Verify February in leap year (29 days) has Remaining Days (Feb 29 - Feb 29)."""
+    """Verify leap February also has strictly 4 weeks."""
     periods = WeeklyCalculationService.get_month_weekly_periods(2028, 2)
-    assert len(periods) == 5
-    assert periods[4]["week"] == "Remaining Days"
-    assert periods[4]["date_range"] == "Feb 29 - Feb 29"
-    assert periods[4]["expected_days"] == 1
+    assert len(periods) == 4
+    week_names = [p["week"] for p in periods]
+    assert "Remaining Days" not in week_names
 
 
 # ==============================================================================
@@ -101,21 +97,18 @@ def test_get_month_weekly_periods_29_days_leap():
 # ==============================================================================
 
 def test_weekly_calculation_service_normal():
-    """Verify backend calculates weekly averages deterministically from daily observations."""
+    """Verify backend calculates weekly averages deterministically for exactly 4 weeks."""
     mock_hist_service = MagicMock()
-    # Mock August 2026 with 31 days of data: 25.0 to 28.0
-    mock_dates = [f"2026-08-{d:02d}" for d in range(1, 32)]
+    mock_dates = [f"2026-08-{d:02d}" for d in range(1, 29)]
     # Week 1: all 26.0 -> avg 26.0
     # Week 2: all 25.0 -> avg 25.0
     # Week 3: all 27.0 -> avg 27.0
     # Week 4: all 24.0 -> avg 24.0
-    # Remaining: all 25.0 -> avg 25.0
     mock_temps = (
         [26.0] * 7 +
         [25.0] * 7 +
         [27.0] * 7 +
-        [24.0] * 7 +
-        [25.0] * 3
+        [24.0] * 7
     )
     mock_hist_service.fetch_historical_temperatures.return_value = {
         "city": "Indore",
@@ -130,7 +123,7 @@ def test_weekly_calculation_service_normal():
     assert result.is_available is True
     assert result.city_display == "Indore, Madhya Pradesh"
     assert result.month_display == "August 2026"
-    assert len(result.weekly_reports) == 5
+    assert len(result.weekly_reports) == 4
 
     assert result.weekly_reports[0].week == "Week 1"
     assert result.weekly_reports[0].average_temperature == 26.0
@@ -145,9 +138,6 @@ def test_weekly_calculation_service_normal():
     assert result.weekly_reports[3].week == "Week 4"
     assert result.weekly_reports[3].average_temperature == 24.0
 
-    assert result.weekly_reports[4].week == "Remaining Days"
-    assert result.weekly_reports[4].average_temperature == 25.0
-
     assert result.highest_week["week"] == "Week 3"
     assert result.highest_week["average_temperature"] == 27.0
 
@@ -158,10 +148,10 @@ def test_weekly_calculation_service_normal():
 def test_weekly_calculation_service_incomplete_days():
     """Verify that missing observations are not replaced by 0 and marked incomplete."""
     mock_hist_service = MagicMock()
-    mock_dates = [f"2026-08-{d:02d}" for d in range(1, 32)]
+    mock_dates = [f"2026-08-{d:02d}" for d in range(1, 29)]
     # Week 1: 5 valid days (20, 22, 24, 26, 28) and 2 None days -> avg 24.0
     w1_temps = [20.0, 22.0, 24.0, 26.0, 28.0, None, None]
-    mock_temps = w1_temps + [25.0] * 24
+    mock_temps = w1_temps + [25.0] * 21
 
     mock_hist_service.fetch_historical_temperatures.return_value = {
         "city": "Bhopal",
@@ -206,11 +196,10 @@ def test_monthly_report_service_success():
     """Verify that MonthlyReportService coordinates calculation, Groq summary, and email structure."""
     mock_calc_service = MagicMock()
     weekly_reports = [
-        WeeklyPeriodReport(week="Week 1", date_range="Aug 1 - Aug 7", start_date="2026-08-01", end_date="2026-08-07", average_temperature=26.4, observation_count=7, expected_days=7, is_complete=True),
-        WeeklyPeriodReport(week="Week 2", date_range="Aug 8 - Aug 14", start_date="2026-08-08", end_date="2026-08-14", average_temperature=25.8, observation_count=7, expected_days=7, is_complete=True),
-        WeeklyPeriodReport(week="Week 3", date_range="Aug 15 - Aug 21", start_date="2026-08-15", end_date="2026-08-21", average_temperature=24.9, observation_count=7, expected_days=7, is_complete=True),
-        WeeklyPeriodReport(week="Week 4", date_range="Aug 22 - Aug 28", start_date="2026-08-22", end_date="2026-08-28", average_temperature=25.6, observation_count=7, expected_days=7, is_complete=True),
-        WeeklyPeriodReport(week="Remaining Days", date_range="Aug 29 - Aug 31", start_date="2026-08-29", end_date="2026-08-31", average_temperature=25.2, observation_count=3, expected_days=3, is_complete=True),
+        WeeklyPeriodReport(week="Week 1", date_range="Aug 1 – Aug 7", start_date="2026-08-01", end_date="2026-08-07", average_temperature=25.6, observation_count=7, expected_days=7, is_complete=True),
+        WeeklyPeriodReport(week="Week 2", date_range="Aug 8 – Aug 14", start_date="2026-08-08", end_date="2026-08-14", average_temperature=24.8, observation_count=7, expected_days=7, is_complete=True),
+        WeeklyPeriodReport(week="Week 3", date_range="Aug 15 – Aug 21", start_date="2026-08-15", end_date="2026-08-21", average_temperature=25.2, observation_count=7, expected_days=7, is_complete=True),
+        WeeklyPeriodReport(week="Week 4", date_range="Aug 22 – Aug 28", start_date="2026-08-22", end_date="2026-08-28", average_temperature=25.3, observation_count=7, expected_days=7, is_complete=True),
     ]
     mock_calc_service.calculate_monthly_weekly_averages.return_value = WeeklyCalculationResult(
         city_display="Indore, Madhya Pradesh",
@@ -221,17 +210,17 @@ def test_monthly_report_service_success():
         month_display="August 2026",
         weekly_reports=weekly_reports,
         is_available=True,
-        highest_week={"week": "Week 1", "date_range": "Aug 1 - Aug 7", "average_temperature": 26.4},
-        lowest_week={"week": "Week 3", "date_range": "Aug 15 - Aug 21", "average_temperature": 24.9},
-        pattern_hint="Relatively stable temperatures",
-        total_valid_observations=31,
-        expected_month_days=31,
+        highest_week={"week": "Week 1", "date_range": "Aug 1 – Aug 7", "average_temperature": 25.6},
+        lowest_week={"week": "Week 2", "date_range": "Aug 8 – Aug 14", "average_temperature": 24.8},
+        pattern_hint="Relatively stable temperatures across the four analyzed weeks",
+        total_valid_observations=28,
+        expected_month_days=28,
     )
 
     mock_llm_service = MagicMock()
     mock_llm_service.generate_monthly_report_summary.return_value = (
-        "Indore experienced relatively stable temperatures during August 2026. "
-        "The highest weekly average temperature was 26.4°C during Week 1, while the lowest was 24.9°C during Week 3."
+        "In Indore, the average temperature during August 2026 remained relatively stable across the four analyzed weeks. "
+        "Week 1 recorded an average of 25.6°C, while Week 2 recorded the lowest weekly average at 24.8°C."
     )
 
     service = MonthlyReportService(calculation_service=mock_calc_service, llm_service=mock_llm_service)
@@ -240,10 +229,10 @@ def test_monthly_report_service_success():
     assert response.status == "SUCCESS"
     assert response.city == "Indore, Madhya Pradesh"
     assert response.month == "August 2026"
-    assert len(response.weekly_averages) == 5
-    assert "26.4°C during Week 1" in response.summary
+    assert len(response.weekly_averages) == 4
+    assert "25.6°C" in response.summary
     assert response.email_payload is not None
-    assert len(response.email_payload["weekly_table"]) == 5
+    assert len(response.email_payload["weekly_table"]) == 4
 
 
 def test_monthly_report_service_unavailable():
@@ -262,7 +251,7 @@ def test_monthly_report_service_unavailable():
         lowest_week=None,
         pattern_hint=None,
         total_valid_observations=0,
-        expected_month_days=31,
+        expected_month_days=28,
         message="Historical weather data is currently unavailable for the selected period.",
     )
     mock_llm_service = MagicMock()
@@ -273,7 +262,6 @@ def test_monthly_report_service_unavailable():
     assert response.status == "UNAVAILABLE"
     assert response.message == "Historical weather data is currently unavailable for the selected period."
     assert response.summary is None
-    # Verify LLM was NOT invoked
     mock_llm_service.generate_monthly_report_summary.assert_not_called()
 
 
@@ -292,11 +280,10 @@ def test_router_get_monthly_report_success(client):
          patch("app.services.monthly_report_service.LLMService.generate_monthly_report_summary") as mock_llm:
 
         weekly_reports = [
-            WeeklyPeriodReport(week="Week 1", date_range="Aug 1 - Aug 7", start_date="2026-08-01", end_date="2026-08-07", average_temperature=26.4, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 2", date_range="Aug 8 - Aug 14", start_date="2026-08-08", end_date="2026-08-14", average_temperature=25.8, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 3", date_range="Aug 15 - Aug 21", start_date="2026-08-15", end_date="2026-08-21", average_temperature=24.9, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 4", date_range="Aug 22 - Aug 28", start_date="2026-08-22", end_date="2026-08-28", average_temperature=25.6, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Remaining Days", date_range="Aug 29 - Aug 31", start_date="2026-08-29", end_date="2026-08-31", average_temperature=25.2, observation_count=3, expected_days=3, is_complete=True),
+            WeeklyPeriodReport(week="Week 1", date_range="Aug 1 – Aug 7", start_date="2026-08-01", end_date="2026-08-07", average_temperature=25.6, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 2", date_range="Aug 8 – Aug 14", start_date="2026-08-08", end_date="2026-08-14", average_temperature=24.8, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 3", date_range="Aug 15 – Aug 21", start_date="2026-08-15", end_date="2026-08-21", average_temperature=25.2, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 4", date_range="Aug 22 – Aug 28", start_date="2026-08-22", end_date="2026-08-28", average_temperature=25.3, observation_count=7, expected_days=7, is_complete=True),
         ]
         mock_calc.return_value = WeeklyCalculationResult(
             city_display="Indore, Madhya Pradesh",
@@ -307,23 +294,23 @@ def test_router_get_monthly_report_success(client):
             month_display="August 2026",
             weekly_reports=weekly_reports,
             is_available=True,
-            highest_week={"week": "Week 1", "date_range": "Aug 1 - Aug 7", "average_temperature": 26.4},
-            lowest_week={"week": "Week 3", "date_range": "Aug 15 - Aug 21", "average_temperature": 24.9},
-            pattern_hint="Relatively stable temperatures",
-            total_valid_observations=31,
-            expected_month_days=31,
+            highest_week={"week": "Week 1", "date_range": "Aug 1 – Aug 7", "average_temperature": 25.6},
+            lowest_week={"week": "Week 2", "date_range": "Aug 8 – Aug 14", "average_temperature": 24.8},
+            pattern_hint="Relatively stable temperatures across the four analyzed weeks",
+            total_valid_observations=28,
+            expected_month_days=28,
         )
-        mock_llm.return_value = "Indore experienced relatively stable temperatures during August 2026."
+        mock_llm.return_value = "In Indore, the average temperature during August 2026 remained relatively stable across the four analyzed weeks."
 
         response = client.get("/api/v1/weather/report/monthly", params={"city": "Indore", "month": "August 2026"})
         assert response.status_code == 200
         data = response.json()
         assert data["city"] == "Indore, Madhya Pradesh"
         assert data["month"] == "August 2026"
-        assert len(data["weekly_averages"]) == 5
-        assert data["weekly_averages"][0]["average_temperature"] == 26.4
-        assert data["weekly_averages"][4]["week"] == "Remaining Days"
-        assert data["summary"] == "Indore experienced relatively stable temperatures during August 2026."
+        assert len(data["weekly_averages"]) == 4
+        assert data["weekly_averages"][0]["average_temperature"] == 25.6
+        assert data["weekly_averages"][3]["week"] == "Week 4"
+        assert "Remaining Days" not in [w["week"] for w in data["weekly_averages"]]
 
 
 def test_router_get_monthly_report_empty_city(client):
@@ -346,11 +333,10 @@ def test_router_post_monthly_report(client):
          patch("app.services.monthly_report_service.LLMService.generate_monthly_report_summary") as mock_llm:
 
         weekly_reports = [
-            WeeklyPeriodReport(week="Week 1", date_range="Jul 1 - Jul 7", start_date="2026-07-01", end_date="2026-07-07", average_temperature=26.6, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 2", date_range="Jul 8 - Jul 14", start_date="2026-07-08", end_date="2026-07-14", average_temperature=27.4, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 3", date_range="Jul 15 - Jul 21", start_date="2026-07-15", end_date="2026-07-21", average_temperature=27.3, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Week 4", date_range="Jul 22 - Jul 28", start_date="2026-07-22", end_date="2026-07-28", average_temperature=25.8, observation_count=7, expected_days=7, is_complete=True),
-            WeeklyPeriodReport(week="Remaining Days", date_range="Jul 29 - Jul 31", start_date="2026-07-29", end_date="2026-07-31", average_temperature=26.3, observation_count=3, expected_days=3, is_complete=True),
+            WeeklyPeriodReport(week="Week 1", date_range="Jul 1 – Jul 7", start_date="2026-07-01", end_date="2026-07-07", average_temperature=26.6, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 2", date_range="Jul 8 – Jul 14", start_date="2026-07-08", end_date="2026-07-14", average_temperature=27.4, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 3", date_range="Jul 15 – Jul 21", start_date="2026-07-15", end_date="2026-07-21", average_temperature=27.3, observation_count=7, expected_days=7, is_complete=True),
+            WeeklyPeriodReport(week="Week 4", date_range="Jul 22 – Jul 28", start_date="2026-07-22", end_date="2026-07-28", average_temperature=25.8, observation_count=7, expected_days=7, is_complete=True),
         ]
         mock_calc.return_value = WeeklyCalculationResult(
             city_display="Bhopal, Madhya Pradesh",
@@ -361,17 +347,17 @@ def test_router_post_monthly_report(client):
             month_display="July 2026",
             weekly_reports=weekly_reports,
             is_available=True,
-            highest_week={"week": "Week 2", "date_range": "Jul 8 - Jul 14", "average_temperature": 27.4},
-            lowest_week={"week": "Week 4", "date_range": "Jul 22 - Jul 28", "average_temperature": 25.8},
-            pattern_hint="Moderate temperature consistency",
-            total_valid_observations=31,
-            expected_month_days=31,
+            highest_week={"week": "Week 2", "date_range": "Jul 8 – Jul 14", "average_temperature": 27.4},
+            lowest_week={"week": "Week 4", "date_range": "Jul 22 – Jul 28", "average_temperature": 25.8},
+            pattern_hint="Moderate temperature consistency across the four analyzed weeks",
+            total_valid_observations=28,
+            expected_month_days=28,
         )
-        mock_llm.return_value = "Bhopal experienced moderate temperatures in July 2026."
+        mock_llm.return_value = "Bhopal experienced moderate temperatures in July 2026 across the four analyzed weeks."
 
         response = client.post("/api/v1/weather/report/monthly", json={"city": "Bhopal", "month": "July 2026"})
         assert response.status_code == 200
         data = response.json()
         assert data["city"] == "Bhopal, Madhya Pradesh"
         assert data["month"] == "July 2026"
-        assert len(data["weekly_averages"]) == 5
+        assert len(data["weekly_averages"]) == 4

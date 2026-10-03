@@ -1843,6 +1843,29 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.report-city-readonly {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  background: rgba(17, 24, 39, 0.5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.95rem;
+  min-height: 42px;
+}
+
+.city-readonly-icon {
+  font-size: 0.9rem;
+}
+
+.city-readonly-name {
+  color: #38bdf8;
+  letter-spacing: -0.01em;
+}
+
 .report-input:focus,
 .report-select:focus {
   border-color: var(--accent-cyan);

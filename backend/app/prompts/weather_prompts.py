@@ -199,21 +199,20 @@ def format_current_weather_payload(
 
 MONTHLY_REPORT_SUMMARY_SYSTEM_PROMPT = """You are a professional weather reporting assistant.
 
-Create a concise and professional summary based ONLY on the
-provided calculated weekly weather data.
+Create a concise and professional summary based ONLY on the provided calculated 4 weekly weather data.
 
 Mention:
 - selected city
 - selected month
 - highest weekly average
 - lowest weekly average
-- general temperature pattern
+- general temperature pattern across the four analyzed weeks
 
 Do not calculate any values yourself.
-Do not invent weather information.
+Do not invent weather values or unsupported facts.
 Do not repeat the complete table.
 Keep the summary to 2-4 sentences.
-Use professional language suitable for a weather report."""
+Use professional language suitable for sending by email."""
 
 
 def format_monthly_report_payload(

@@ -63,17 +63,15 @@ class WeeklyCalculationService:
 
     @staticmethod
     def get_month_weekly_periods(year: int, month: int) -> List[Dict[str, Any]]:
-        """Divide a calendar month into weekly periods plus remaining days.
+        """Divide a calendar month into exactly 4 weekly periods.
 
         Rules:
-        - Week 1: days 1-7
-        - Week 2: days 8-14
-        - Week 3: days 15-21
-        - Week 4: days 22-28
-        - Remaining Days: days 29-end of month (if total_days > 28)
-        - Never call remaining days "Week 5".
+        - Week 1: days 1–7
+        - Week 2: days 8–14
+        - Week 3: days 15–21
+        - Week 4: days 22–28
+        - Strictly 4 weeks; no remaining days or 5th period.
         """
-        num_days = calendar.monthrange(year, month)[1]
         month_abbr = calendar.month_abbr[month]
 
         periods = []
@@ -84,25 +82,11 @@ class WeeklyCalculationService:
                 "week": f"Week {week_idx}",
                 "start_day": start_day,
                 "end_day": end_day,
-                "date_range": f"{month_abbr} {start_day} - {month_abbr} {end_day}",
+                "date_range": f"{month_abbr} {start_day} – {month_abbr} {end_day}",
                 "start_date": f"{year:04d}-{month:02d}-{start_day:02d}",
                 "end_date": f"{year:04d}-{month:02d}-{end_day:02d}",
                 "expected_days": 7,
                 "is_remaining": False,
-            })
-
-        if num_days > 28:
-            start_day = 29
-            end_day = num_days
-            periods.append({
-                "week": "Remaining Days",
-                "start_day": start_day,
-                "end_day": end_day,
-                "date_range": f"{month_abbr} {start_day} - {month_abbr} {end_day}",
-                "start_date": f"{year:04d}-{month:02d}-{start_day:02d}",
-                "end_date": f"{year:04d}-{month:02d}-{end_day:02d}",
-                "expected_days": end_day - start_day + 1,
-                "is_remaining": True,
             })
 
         return periods
@@ -154,9 +138,8 @@ class WeeklyCalculationService:
             raise ValueError("City name cannot be empty.")
 
         clean_city = city.strip()
-        num_days = calendar.monthrange(year, month)[1]
         start_date_str = f"{year:04d}-{month:02d}-01"
-        end_date_str = f"{year:04d}-{month:02d}-{num_days:02d}"
+        end_date_str = f"{year:04d}-{month:02d}-28"
 
         month_name = calendar.month_name[month]
         month_display = f"{month_name} {year}"
@@ -258,7 +241,7 @@ class WeeklyCalculationService:
                 lowest_week=None,
                 pattern_hint=None,
                 total_valid_observations=0,
-                expected_month_days=num_days,
+                expected_month_days=28,
                 message="Historical weather data is currently unavailable for the selected period.",
             )
 
@@ -280,15 +263,15 @@ class WeeklyCalculationService:
         diff = round(highest_tuple[1] - lowest_tuple[1], 1)
         if diff <= 1.5:
             pattern_hint = (
-                f"Relatively stable and consistent temperatures throughout the analyzed period with minimal variation under {max(diff, 0.5):.1f}°C."
+                f"Relatively stable and consistent temperatures across the four analyzed weeks with minimal variation under {max(diff, 0.5):.1f}°C."
             )
         elif diff <= 3.0:
             pattern_hint = (
-                f"Moderate temperature consistency with a mild fluctuation range of {diff:.1f}°C between the warmest and coolest weeks."
+                f"Moderate temperature consistency across the four analyzed weeks with a mild fluctuation range of {diff:.1f}°C between the warmest and coolest weeks."
             )
         else:
             pattern_hint = (
-                f"Noticeable temperature variation across the month with a difference of {diff:.1f}°C between peak and low weekly averages."
+                f"Noticeable temperature variation across the four analyzed weeks with a difference of {diff:.1f}°C between peak and low weekly averages."
             )
 
         return WeeklyCalculationResult(
@@ -304,6 +287,6 @@ class WeeklyCalculationService:
             lowest_week=lowest_week,
             pattern_hint=pattern_hint,
             total_valid_observations=total_valid_obs,
-            expected_month_days=num_days,
+            expected_month_days=28,
             message=None,
         )

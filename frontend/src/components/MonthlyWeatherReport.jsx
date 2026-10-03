@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { getMonthlyWeatherReport } from "../services/api";
 
 const PRESET_MONTHS = [
@@ -16,22 +16,22 @@ const PRESET_MONTHS = [
   "October 2025",
 ];
 
-export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
-  const [city, setCity] = useState(defaultCity || "Indore");
+export function MonthlyWeatherReport({ city = "Indore" }) {
   const [month, setMonth] = useState("August 2026");
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handlePresetSelect = (presetCity, presetMonth) => {
-    setCity(presetCity);
-    setMonth(presetMonth);
-  };
+  // When city changes from Current Weather search, clear previous report
+  useEffect(() => {
+    setReport(null);
+    setError(null);
+  }, [city]);
 
   const handleGenerateReport = async (e) => {
     if (e) e.preventDefault();
     if (!city || !city.trim()) {
-      setError("Please enter a city.");
+      setError("Please search for a city first.");
       return;
     }
 
@@ -56,6 +56,11 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
     }
   };
 
+  // Ensure exactly 4 weeks (no Remaining Days)
+  const fourWeeks = report?.weekly_averages
+    ? report.weekly_averages.filter((item) => item.week !== "Remaining Days").slice(0, 4)
+    : [];
+
   return (
     <section className="monthly-report-section" aria-label="Monthly Weather Report Generation">
       <div className="monthly-report-card">
@@ -65,27 +70,20 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
             <span className="report-badge">Report Generator</span>
             <h2 className="report-heading">Monthly Weather Report</h2>
             <p className="report-subheading">
-              Select a city and historical month to calculate weekly temperature averages and generate a professional meteorological report.
+              Generate a professional 4-week weather report for the selected city.
             </p>
           </div>
         </div>
 
-        {/* Input Controls */}
+        {/* Input Controls: Read-only City from Current Weather + Month Dropdown */}
         <form onSubmit={handleGenerateReport} className="report-controls-form">
           <div className="report-controls-grid">
             <div className="report-input-group">
-              <label htmlFor="report-city-input" className="report-label">
-                City
-              </label>
-              <input
-                id="report-city-input"
-                type="text"
-                className="report-input"
-                placeholder="Enter city (e.g. Indore, Bhopal, Mumbai)"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                disabled={loading}
-              />
+              <span className="report-label">City</span>
+              <div className="report-city-readonly" id="report-city-readonly">
+                <span className="city-readonly-icon" aria-hidden="true">📍</span>
+                <span className="city-readonly-name">{city || "Indore"}</span>
+              </div>
             </div>
 
             <div className="report-input-group">
@@ -112,7 +110,7 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
                 type="submit"
                 id="generate-weather-report-btn"
                 className="generate-report-btn"
-                disabled={loading || !city.trim()}
+                disabled={loading || !city || !city.trim()}
               >
                 {loading ? (
                   <>
@@ -126,33 +124,20 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
             </div>
           </div>
 
-          {/* Quick Presets for Convenient Testing */}
+          {/* Quick Month Selectors */}
           <div className="report-presets-row">
-            <span className="presets-label">Quick select:</span>
-            <button
-              type="button"
-              className={`preset-pill ${city === "Indore" && month === "August 2026" ? "active" : ""}`}
-              onClick={() => handlePresetSelect("Indore", "August 2026")}
-              disabled={loading}
-            >
-              Indore (August 2026)
-            </button>
-            <button
-              type="button"
-              className={`preset-pill ${city === "Bhopal" && month === "July 2026" ? "active" : ""}`}
-              onClick={() => handlePresetSelect("Bhopal", "July 2026")}
-              disabled={loading}
-            >
-              Bhopal (July 2026)
-            </button>
-            <button
-              type="button"
-              className={`preset-pill ${city === "Mumbai" && month === "September 2026" ? "active" : ""}`}
-              onClick={() => handlePresetSelect("Mumbai", "September 2026")}
-              disabled={loading}
-            >
-              Mumbai (September 2026)
-            </button>
+            <span className="presets-label">Quick month:</span>
+            {["August 2026", "July 2026", "September 2026"].map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`preset-pill ${month === m ? "active" : ""}`}
+                onClick={() => setMonth(m)}
+                disabled={loading}
+              >
+                {m}
+              </button>
+            ))}
           </div>
         </form>
 
@@ -183,7 +168,7 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
                 </div>
               </div>
 
-              {/* Weekly Average Temperature Section */}
+              {/* Weekly Average Temperature Section (Exactly 4 Weeks) */}
               <div className="report-doc-section">
                 <h3 className="section-title">WEEKLY AVERAGE TEMPERATURE</h3>
                 <div className="table-wrapper">
@@ -196,11 +181,8 @@ export function MonthlyWeatherReport({ defaultCity = "Indore" }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {report.weekly_averages && report.weekly_averages.map((item, idx) => (
-                        <tr
-                          key={item.week || idx}
-                          className={item.week === "Remaining Days" ? "remaining-row" : ""}
-                        >
+                      {fourWeeks.map((item, idx) => (
+                        <tr key={item.week || idx}>
                           <td className="week-name-cell">
                             <span className="week-name">{item.week}</span>
                             {item.note && (
