@@ -18,6 +18,7 @@ from app.clients.groq_client import (
 )
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
+    AmbiguousLocationError,
     GoogleWeatherClient,
     WeatherClientError,
     CityNotFoundError,
@@ -42,6 +43,7 @@ __all__ = [
     "OpenMeteoClient",
     "WeatherClientError",
     "CityNotFoundError",
+    "AmbiguousLocationError",
     "WeatherAuthenticationError",
     "WeatherRateLimitError",
     "WeatherTimeoutError",

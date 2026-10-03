@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.clients.weather_client import (
+    AmbiguousLocationError,
     CityNotFoundError,
     WeatherAuthenticationError,
     WeatherRateLimitError,
@@ -62,6 +63,12 @@ def get_current_weather_endpoint(
         return service.get_current_weather(city)
     except ValueError as exc:
         logger.warning("Validation error for city '%s': %s", city, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except AmbiguousLocationError as exc:
+        logger.warning("Ambiguous location for city '%s': %s", city, exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
@@ -146,6 +153,12 @@ def get_weather_forecast_endpoint(
         return service.get_forecast(city=city, days=days)
     except ValueError as exc:
         logger.warning("Validation error for city '%s' / days '%s': %s", city, days, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except AmbiguousLocationError as exc:
+        logger.warning("Ambiguous location for city '%s': %s", city, exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

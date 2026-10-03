@@ -12,7 +12,11 @@ from app.agents.weather_agent_prompts import (
 )
 from app.agents.weather_agent_state import WeatherAgentState
 from app.clients.groq_client import BaseLLMClient, GroqClient, LLMClientError
-from app.clients.weather_client import CityNotFoundError, WeatherClientError
+from app.clients.weather_client import (
+    AmbiguousLocationError,
+    CityNotFoundError,
+    WeatherClientError,
+)
 from app.tools.weather_tools import (
     get_current_weather,
     get_historical_average_weather,
@@ -210,6 +214,9 @@ def current_weather_node(
             "result": data,
             "error": None,
         }
+    except AmbiguousLocationError as exc:
+        logger.warning("Ambiguous location in current_weather_node: %s", exc)
+        return {**state, "error": str(exc), "weather_data": None, "result": None}
     except CityNotFoundError:
         logger.warning("City not found: %s", city)
         return {**state, "error": "city_not_found", "weather_data": None, "result": None}
@@ -251,6 +258,9 @@ def forecast_node(
             "result": data,
             "error": None,
         }
+    except AmbiguousLocationError as exc:
+        logger.warning("Ambiguous location for forecast '%s': %s", city, exc)
+        return {**state, "error": str(exc), "weather_data": None, "result": None}
     except CityNotFoundError:
         logger.warning("City not found for forecast: %s", city)
         return {**state, "error": "city_not_found", "weather_data": None, "result": None}
@@ -305,6 +315,9 @@ def historical_average_node(
             "result": data,
             "error": None,
         }
+    except AmbiguousLocationError as exc:
+        logger.warning("Ambiguous location for historical statistics '%s': %s", city, exc)
+        return {**state, "error": str(exc), "weather_data": None, "result": None}
     except CityNotFoundError:
         logger.warning("City not found for historical statistics: %s", city)
         return {**state, "error": "city_not_found", "weather_data": None, "result": None}
@@ -378,6 +391,9 @@ def generate_response_node(
     weather_data = state.get("weather_data")
 
     # Handle error or missing city cases
+    if error and ("Multiple locations match" in str(error) or "specify the country" in str(error)):
+        return {**state, "response": str(error)}
+
     if error == "missing_city":
         response_text = (
             "Please specify a city to get weather information. "

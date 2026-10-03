@@ -65,19 +65,34 @@ class OpenMeteoClient:
 
     def geocode_city(self, city: str) -> Dict[str, Any]:
         """Convert a city name into geographical coordinates using Open-Meteo Geocoding API."""
+        if not city or not city.strip():
+            raise CityNotFoundError("City name cannot be empty.")
+
+        clean_city = city.strip()
+        from app.services.location_service import (
+            INDIAN_CITY_ALIASES,
+            format_location_address,
+            normalize_name,
+            select_best_candidate,
+        )
+
+        norm_city = normalize_name(clean_city)
+        if norm_city in INDIAN_CITY_ALIASES:
+            clean_city = INDIAN_CITY_ALIASES[norm_city]
+
         params = {
-            "name": city,
-            "count": 1,
+            "name": clean_city,
+            "count": 20,
             "language": "en",
             "format": "json",
         }
-        logger.debug("Open-Meteo geocoding for city: %s", city)
+        logger.debug("Open-Meteo geocoding for city: %s", clean_city)
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.get(self.geocoding_base_url, params=params)
         except httpx.TimeoutException as exc:
-            logger.error("Open-Meteo geocoding timed out for city: %s", city)
+            logger.error("Open-Meteo geocoding timed out for city: %s", clean_city)
             raise WeatherTimeoutError("Geocoding request timed out.") from exc
         except httpx.RequestError as exc:
             logger.error("Open-Meteo network error during geocoding: %s", str(exc))
@@ -95,20 +110,32 @@ class OpenMeteoClient:
 
         results = payload.get("results")
         if not results:
-            logger.warning("City '%s' not found via Open-Meteo", city)
-            raise CityNotFoundError(f"City '{city}' not found.")
+            logger.warning("City '%s' not found via Open-Meteo", clean_city)
+            raise CityNotFoundError(f"City '{clean_city}' not found.")
 
-        item = results[0]
-        name = item.get("name", city)
+        item = select_best_candidate(clean_city, results)
+        name = item.get("name", clean_city)
         admin1 = item.get("admin1")
         country = item.get("country")
-        parts = [p for p in (name, admin1, country) if p]
-        formatted_address = ", ".join(parts) if parts else city
+        country_code = item.get("country_code")
+
+        formatted_address = format_location_address(
+            name=name,
+            admin1=admin1,
+            country=country,
+            country_code=country_code,
+        )
 
         return {
+            "name": name,
+            "city": name,
             "latitude": float(item["latitude"]),
             "longitude": float(item["longitude"]),
             "formatted_address": formatted_address,
+            "timezone": item.get("timezone", "Asia/Kolkata" if country_code == "IN" else "UTC"),
+            "admin1": admin1,
+            "country": country,
+            "country_code": country_code,
         }
 
     def get_current_conditions(self, latitude: float, longitude: float) -> Dict[str, Any]:

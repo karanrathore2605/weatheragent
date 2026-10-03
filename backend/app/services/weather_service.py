@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
+    AmbiguousLocationError,
     CityNotFoundError,
     GoogleWeatherClient,
     WeatherAuthenticationError,
@@ -378,6 +379,8 @@ class WeatherService:
         """Resolve city name to geographical coordinates using existing geocoding logic."""
         try:
             return self.client.geocode_city(city)
+        except (AmbiguousLocationError, CityNotFoundError):
+            raise
         except (WeatherAuthenticationError, WeatherServiceUnavailableError, WeatherClientError):
             if self.fallback_client is not None:
                 logger.info("Resolving coordinates for '%s' using existing geocoding logic", city)

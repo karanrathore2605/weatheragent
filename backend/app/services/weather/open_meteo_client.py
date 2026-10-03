@@ -61,6 +61,17 @@ class OpenMeteoClient:
             raise CityNotFoundError("City name cannot be empty.")
 
         city_clean = city.strip()
+        from app.services.location_service import (
+            INDIAN_CITY_ALIASES,
+            format_location_address,
+            normalize_name,
+            select_best_candidate,
+        )
+
+        norm_city = normalize_name(city_clean)
+        if norm_city in INDIAN_CITY_ALIASES:
+            city_clean = INDIAN_CITY_ALIASES[norm_city]
+
         cache_key = city_clean.lower()
 
         if cache_key in self._location_cache:
@@ -69,7 +80,7 @@ class OpenMeteoClient:
 
         params = {
             "name": city_clean,
-            "count": 1,
+            "count": 20,
             "language": "en",
             "format": "json",
         }
@@ -113,20 +124,25 @@ class OpenMeteoClient:
             logger.warning("City '%s' not found via Open-Meteo geocoding", city_clean)
             raise CityNotFoundError(f"City '{city_clean}' not found.")
 
-        first_match = results[0]
-        resolved_name = first_match.get("name", city_clean)
-        admin1 = first_match.get("admin1", "")
-        country = first_match.get("country", "")
-        timezone_name = first_match.get("timezone", "auto")
+        best_match = select_best_candidate(city_clean, results)
+        resolved_name = best_match.get("name", city_clean)
+        admin1 = best_match.get("admin1", "")
+        country = best_match.get("country", "")
+        country_code = best_match.get("country_code", "")
+        timezone_name = best_match.get("timezone", "Asia/Kolkata" if country_code == "IN" else "auto")
 
-        parts = [p for p in (resolved_name, admin1, country) if p]
-        formatted_address = ", ".join(parts) if parts else city_clean
+        formatted_address = format_location_address(
+            name=resolved_name,
+            admin1=admin1,
+            country=country,
+            country_code=country_code,
+        )
 
         location_info = {
             "name": resolved_name,
             "city": resolved_name,
-            "latitude": float(first_match["latitude"]),
-            "longitude": float(first_match["longitude"]),
+            "latitude": float(best_match["latitude"]),
+            "longitude": float(best_match["longitude"]),
             "timezone": timezone_name,
             "country": country,
             "admin1": admin1,

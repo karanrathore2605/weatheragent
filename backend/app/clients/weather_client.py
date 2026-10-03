@@ -18,6 +18,10 @@ class CityNotFoundError(WeatherClientError):
     """Raised when the specified city cannot be found or geocoded."""
 
 
+class AmbiguousLocationError(WeatherClientError):
+    """Raised when a location query matches multiple competing locations without qualification."""
+
+
 class WeatherAuthenticationError(WeatherClientError):
     """Raised when API key is missing or authentication fails."""
 

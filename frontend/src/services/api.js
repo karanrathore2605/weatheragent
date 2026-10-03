@@ -35,7 +35,7 @@ async function request(endpoint, options = {}) {
 
       // Map status codes to clean user-facing error messages
       if (response.status === 404) {
-        throw new Error("City not found. Please check the city name.");
+        throw new Error(rawDetail || "City not found. Please check the city name.");
       }
       if (response.status === 400) {
         if (rawDetail.toLowerCase().includes("empty")) {
