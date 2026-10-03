@@ -6,8 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
+    CityNotFoundError,
     GoogleWeatherClient,
     WeatherAuthenticationError,
+    WeatherClientError,
     WeatherServiceUnavailableError,
 )
 from app.repositories.weather_observation_repository import WeatherObservationRepository
@@ -141,7 +143,9 @@ class WeatherService:
             observed_at = str(observed_at)
 
         # 7. Cloud cover
-        raw_cloud = raw_conditions.get("cloudCover") or raw_conditions.get("cloud_cover")
+        raw_cloud = raw_conditions.get("cloudCover")
+        if raw_cloud is None:
+            raw_cloud = raw_conditions.get("cloud_cover")
         cloud_val = None
         if isinstance(raw_cloud, dict):
             cloud_val = raw_cloud.get("percentage") or raw_cloud.get("value")
@@ -152,7 +156,9 @@ class WeatherService:
                 cloud_val = None
 
         # 8. UV index
-        raw_uv = raw_conditions.get("uvIndex") or raw_conditions.get("uv_index")
+        raw_uv = raw_conditions.get("uvIndex")
+        if raw_uv is None:
+            raw_uv = raw_conditions.get("uv_index")
         uv_val = None
         if isinstance(raw_uv, dict):
             uv_val = raw_uv.get("value")
@@ -166,7 +172,13 @@ class WeatherService:
         raw_vis = raw_conditions.get("visibility")
         vis_val = None
         if isinstance(raw_vis, dict):
-            vis_val = raw_vis.get("distance", {}).get("value") if isinstance(raw_vis.get("distance"), dict) else raw_vis.get("value")
+            dist = raw_vis.get("distance")
+            if isinstance(dist, dict):
+                vis_val = dist.get("value")
+            elif dist is not None:
+                vis_val = dist
+            else:
+                vis_val = raw_vis.get("value")
         elif raw_vis is not None:
             vis_val = raw_vis
         if vis_val is not None:
@@ -362,57 +374,45 @@ class WeatherService:
         except Exception as exc:
             logger.warning("Could not persist weather observation for city '%s': %s", weather_resp.city, exc)
 
+    def resolve_city_coordinates(self, city: str) -> Dict[str, Any]:
+        """Resolve city name to geographical coordinates using existing geocoding logic."""
+        try:
+            return self.client.geocode_city(city)
+        except (WeatherAuthenticationError, WeatherServiceUnavailableError, WeatherClientError):
+            if self.fallback_client is not None:
+                logger.info("Resolving coordinates for '%s' using existing geocoding logic", city)
+                return self.fallback_client.geocode_city(city)
+            raise
+
     def get_current_weather(self, city: str) -> WeatherResponse:
-        """Execute full flow: validate -> geocode -> fetch conditions -> normalize."""
+        """Execute full flow: validate -> geocode -> fetch conditions from Google Weather API -> normalize."""
         valid_city = self.validate_city_input(city)
 
-        logger.info("Resolving current weather for city: %s", valid_city)
+        logger.info("Resolving current weather for city: %s via Google Weather API", valid_city)
 
-        try:
-            # Step 1: Geocode city to coordinates
-            location = self.client.geocode_city(valid_city)
+        # Step 1: Geocode city to coordinates using existing geocoding logic
+        location = self.resolve_city_coordinates(valid_city)
 
-            # Step 2: Query current conditions using coordinates
-            raw_conditions = self.client.get_current_conditions(
-                latitude=location["latitude"],
-                longitude=location["longitude"],
-            )
+        # Step 2: Query live conditions from Google Weather API (Single Source for Current Weather)
+        raw_conditions = self.client.get_current_conditions(
+            latitude=location["latitude"],
+            longitude=location["longitude"],
+        )
 
-            # Step 3: Normalize to canonical schema
-            res = self.normalize_weather_data(
-                city_name=valid_city,
-                location=location,
-                raw_conditions=raw_conditions,
-            )
+        # Step 3: Normalize to canonical schema
+        res = self.normalize_weather_data(
+            city_name=valid_city,
+            location=location,
+            raw_conditions=raw_conditions,
+        )
 
-            # Step 4: Persist observation for statistics
-            self._persist_observation(res, location, raw_conditions, source="google")
+        # Step 4: Persist observation for statistics
+        self._persist_observation(res, location, raw_conditions, source="google")
 
-            # Step 5: Attach AI meteorological summary
-            self._attach_current_weather_summary(res)
+        # Step 5: Attach AI meteorological summary
+        self._attach_current_weather_summary(res)
 
-            return res
-        except (WeatherAuthenticationError, WeatherServiceUnavailableError) as exc:
-            if self.fallback_client is not None:
-                logger.warning(
-                    "Primary weather provider unavailable (%s). Falling back to Open-Meteo for city: %s",
-                    exc,
-                    valid_city,
-                )
-                location = self.fallback_client.geocode_city(valid_city)
-                raw_conditions = self.fallback_client.get_current_conditions(
-                    latitude=location["latitude"],
-                    longitude=location["longitude"],
-                )
-                res = self.normalize_weather_data(
-                    city_name=valid_city,
-                    location=location,
-                    raw_conditions=raw_conditions,
-                )
-                self._persist_observation(res, location, raw_conditions, source="open-meteo")
-                self._attach_current_weather_summary(res)
-                return res
-            raise
+        return res
 
     def _attach_current_weather_summary(self, weather_resp: WeatherResponse) -> None:
         """Enrich WeatherResponse with AI meteorological summary, failing gracefully if unavailable."""
@@ -443,10 +443,10 @@ class WeatherService:
 
         logger.info("Resolving %s-day weather forecast for city: %s", valid_days, valid_city)
 
-        try:
-            # Step 1: Geocode city to coordinates
-            location = self.client.geocode_city(valid_city)
+        # Step 1: Geocode city to coordinates using existing geocoding logic
+        location = self.resolve_city_coordinates(valid_city)
 
+        try:
             # Step 2: Query multi-day forecast using coordinates
             raw_forecast = self.client.get_forecast(
                 latitude=location["latitude"],
@@ -468,7 +468,6 @@ class WeatherService:
                     exc,
                     valid_city,
                 )
-                location = self.fallback_client.geocode_city(valid_city)
                 raw_forecast = self.fallback_client.get_forecast(
                     latitude=location["latitude"],
                     longitude=location["longitude"],

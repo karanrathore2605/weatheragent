@@ -152,4 +152,25 @@ class LLMService:
         if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
             cleaned = cleaned[1:-1].strip()
 
+        replacements = {
+            "\u2011": "-",
+            "\u2012": "-",
+            "\u2013": "-",
+            "\u2014": "-",
+            "\u202f": " ",
+            "\xa0": " ",
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2026": "...",
+            "\u207b": "-",
+            "\u00b9": "1",
+            "\u00b2": "2",
+            "\u00b3": "3",
+            "\u2212": "-",
+        }
+        for char, repl in replacements.items():
+            cleaned = cleaned.replace(char, repl)
+
         return cleaned
