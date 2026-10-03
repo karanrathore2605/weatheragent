@@ -12,6 +12,7 @@ from app.clients.weather_client import (
 )
 from app.repositories.weather_observation_repository import WeatherObservationRepository
 from app.schemas.weather_schema import ForecastDay, ForecastResponse, WeatherResponse
+from app.services.llm_service import LLMService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,6 +32,7 @@ class WeatherService:
         client: Optional[GoogleWeatherClient] = None,
         fallback_client: Optional[Any] = None,
         repository: Optional[WeatherObservationRepository] = None,
+        llm_service: Optional[LLMService] = None,
     ) -> None:
         self.client = client or GoogleWeatherClient()
         if client is None and fallback_client is None:
@@ -38,6 +40,7 @@ class WeatherService:
         else:
             self.fallback_client = fallback_client
         self.repository = repository
+        self.llm_service = llm_service or LLMService()
 
     def validate_city_input(self, city: str) -> str:
         """Validate requested city name string.
@@ -137,6 +140,56 @@ class WeatherService:
         else:
             observed_at = str(observed_at)
 
+        # 7. Cloud cover
+        raw_cloud = raw_conditions.get("cloudCover") or raw_conditions.get("cloud_cover")
+        cloud_val = None
+        if isinstance(raw_cloud, dict):
+            cloud_val = raw_cloud.get("percentage") or raw_cloud.get("value")
+        elif raw_cloud is not None:
+            try:
+                cloud_val = int(raw_cloud)
+            except (ValueError, TypeError):
+                cloud_val = None
+
+        # 8. UV index
+        raw_uv = raw_conditions.get("uvIndex") or raw_conditions.get("uv_index")
+        uv_val = None
+        if isinstance(raw_uv, dict):
+            uv_val = raw_uv.get("value")
+        elif raw_uv is not None:
+            try:
+                uv_val = round(float(raw_uv), 1)
+            except (ValueError, TypeError):
+                uv_val = None
+
+        # 9. Visibility in km
+        raw_vis = raw_conditions.get("visibility")
+        vis_val = None
+        if isinstance(raw_vis, dict):
+            vis_val = raw_vis.get("distance", {}).get("value") if isinstance(raw_vis.get("distance"), dict) else raw_vis.get("value")
+        elif raw_vis is not None:
+            vis_val = raw_vis
+        if vis_val is not None:
+            try:
+                v_num = float(vis_val)
+                if v_num > 100:  # Reported in meters, convert to km
+                    vis_val = round(v_num / 1000.0, 1)
+                else:
+                    vis_val = round(v_num, 1)
+            except (ValueError, TypeError):
+                vis_val = None
+
+        # 10. Precipitation in mm
+        raw_precip = raw_conditions.get("precipitation")
+        precip_val = None
+        if isinstance(raw_precip, dict):
+            precip_val = raw_precip.get("qpf", {}).get("quantity") or raw_precip.get("value")
+        elif raw_precip is not None:
+            try:
+                precip_val = round(float(raw_precip), 1)
+            except (ValueError, TypeError):
+                precip_val = None
+
         formatted_address = location.get("formatted_address", city_name)
         primary_city = formatted_address.split(",")[0].strip() if formatted_address else city_name
 
@@ -149,6 +202,10 @@ class WeatherService:
             condition=condition_text or "Clear",
             observed_at=observed_at,
             resolved_address=formatted_address,
+            cloud_cover=cloud_val,
+            uv_index=uv_val,
+            visibility=vis_val,
+            precipitation=precip_val,
         )
 
     def normalize_forecast_data(
@@ -331,6 +388,9 @@ class WeatherService:
             # Step 4: Persist observation for statistics
             self._persist_observation(res, location, raw_conditions, source="google")
 
+            # Step 5: Attach AI meteorological summary
+            self._attach_current_weather_summary(res)
+
             return res
         except (WeatherAuthenticationError, WeatherServiceUnavailableError) as exc:
             if self.fallback_client is not None:
@@ -350,8 +410,31 @@ class WeatherService:
                     raw_conditions=raw_conditions,
                 )
                 self._persist_observation(res, location, raw_conditions, source="open-meteo")
+                self._attach_current_weather_summary(res)
                 return res
             raise
+
+    def _attach_current_weather_summary(self, weather_resp: WeatherResponse) -> None:
+        """Enrich WeatherResponse with AI meteorological summary, failing gracefully if unavailable."""
+        try:
+            summary = self.llm_service.generate_current_weather_summary(
+                city=weather_resp.city,
+                weather_data=weather_resp.model_dump(),
+                raise_on_error=False,
+            )
+            if summary:
+                weather_resp.summary = summary
+                weather_resp.summary_status = "SUCCESS"
+                weather_resp.summary_message = None
+            else:
+                weather_resp.summary = None
+                weather_resp.summary_status = "UNAVAILABLE"
+                weather_resp.summary_message = "Weather summary is currently unavailable. Current weather data is shown above."
+        except Exception as exc:
+            logger.warning("Error generating current weather summary for '%s': %s", weather_resp.city, exc)
+            weather_resp.summary = None
+            weather_resp.summary_status = "UNAVAILABLE"
+            weather_resp.summary_message = "Weather summary is currently unavailable. Current weather data is shown above."
 
     def get_forecast(self, city: str, days: int = 5) -> ForecastResponse:
         """Execute full forecast flow: validate -> geocode -> fetch forecast -> normalize."""

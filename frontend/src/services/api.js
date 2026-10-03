@@ -108,11 +108,25 @@ export async function getWeatherStatistics(city, periodType = "week", duration =
   );
 }
 
+/**
+ * Fetch meteorological statistics along with AI natural-language summary for a city.
+ * Calls GET /api/v1/weather/statistics/summary?city=...&period_type=...&duration=...
+ */
+export async function getWeatherSummary(city, periodType = "week", duration = 1) {
+  if (!city || !city.trim()) {
+    throw new Error("Please enter a city.");
+  }
+  return request(
+    `/api/v1/weather/statistics/summary?city=${encodeURIComponent(city.trim())}&period_type=${encodeURIComponent(periodType)}&duration=${encodeURIComponent(duration)}&period_value=${encodeURIComponent(duration)}`
+  );
+}
+
 export default {
   getHealthStatus,
   getRootInfo,
   getCurrentWeather,
   getWeatherForecast,
   getWeatherStatistics,
+  getWeatherSummary,
 };
 

@@ -6,6 +6,16 @@ Architecture Rule:
 """
 
 from app.clients.accuweather_client import AccuWeatherClient
+from app.clients.groq_client import (
+    BaseLLMClient,
+    GroqClient,
+    LLMAuthenticationError,
+    LLMClientError,
+    LLMEmptyResponseError,
+    LLMRateLimitError,
+    LLMServiceUnavailableError,
+    LLMTimeoutError,
+)
 from app.clients.open_meteo_client import OpenMeteoClient
 from app.clients.weather_client import (
     GoogleWeatherClient,
@@ -20,7 +30,15 @@ from app.clients.weather_client import (
 
 __all__ = [
     "AccuWeatherClient",
+    "BaseLLMClient",
     "GoogleWeatherClient",
+    "GroqClient",
+    "LLMAuthenticationError",
+    "LLMClientError",
+    "LLMEmptyResponseError",
+    "LLMRateLimitError",
+    "LLMServiceUnavailableError",
+    "LLMTimeoutError",
     "OpenMeteoClient",
     "WeatherClientError",
     "CityNotFoundError",

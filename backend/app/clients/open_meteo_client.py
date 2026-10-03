@@ -116,7 +116,7 @@ class OpenMeteoClient:
         params = {
             "latitude": latitude,
             "longitude": longitude,
-            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,precipitation,cloud_cover,uv_index,visibility",
             "timezone": "auto",
         }
         logger.debug("Open-Meteo requesting current conditions for lat=%s, lng=%s", latitude, longitude)
@@ -152,6 +152,10 @@ class OpenMeteoClient:
             "relativeHumidity": int(current.get("relative_humidity_2m", 0)),
             "wind": {"speed": {"value": current.get("wind_speed_10m", 0.0)}},
             "weatherCondition": {"description": {"text": condition_text}},
+            "precipitation": current.get("precipitation"),
+            "cloudCover": current.get("cloud_cover"),
+            "uvIndex": current.get("uv_index"),
+            "visibility": current.get("visibility"),
         }
 
     def get_forecast(self, latitude: float, longitude: float, days: int = 5) -> Dict[str, Any]:

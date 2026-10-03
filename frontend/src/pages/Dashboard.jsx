@@ -5,6 +5,7 @@ import {
   LoadingState,
   ErrorMessage,
   CurrentWeatherCard,
+  WeatherSummaryCard,
   ForecastGrid,
   WeatherStatistics,
 } from "../components";
@@ -74,6 +75,12 @@ export function Dashboard() {
           {!loading && !error && currentWeather && (
             <div className="weather-display-area">
               <CurrentWeatherCard data={currentWeather} />
+              <WeatherSummaryCard
+                summary={currentWeather.summary}
+                status={currentWeather.summary_status}
+                message={currentWeather.summary_message}
+                loading={loading}
+              />
               <ForecastGrid forecastData={forecastData} />
               <WeatherStatistics city={activeCity} />
             </div>

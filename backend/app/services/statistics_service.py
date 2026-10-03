@@ -14,9 +14,11 @@ from app.schemas.weather_schema import (
     StatisticsMetrics,
     StatisticsPeriod,
     WeatherStatisticsResponse,
+    WeatherSummaryResponse,
 )
 from app.services.average_temperature_calculator import AverageTemperatureCalculator
 from app.services.historical_weather_service import HistoricalWeatherService
+from app.services.llm_service import LLMService
 from app.services.weather.open_meteo_client import OpenMeteoClient
 from app.utils.logger import get_logger
 
@@ -118,6 +120,7 @@ class StatisticsService:
         min_coverage: Optional[float] = None,
         temperature_calculator: Optional[AverageTemperatureCalculator] = None,
         calculator: Optional[Any] = None,
+        llm_service: Optional[LLMService] = None,
     ) -> None:
         if historical_service is not None:
             self.historical_service = historical_service
@@ -131,6 +134,7 @@ class StatisticsService:
             min_coverage if min_coverage is not None else settings.min_statistics_coverage
         )
         self.temperature_calculator = temperature_calculator or AverageTemperatureCalculator()
+        self.llm_service = llm_service or LLMService()
 
     @staticmethod
     def validate_city_input(city: str) -> str:
@@ -677,4 +681,77 @@ class StatisticsService:
             coverage_percent=overall_coverage,
             observation_count=total_observation_days,
         )
+
+    def get_weather_summary(
+        self,
+        city: str,
+        period: Union[StatisticsPeriod, str] = StatisticsPeriod.WEEK,
+        period_value: int = 1,
+        duration: Optional[int] = None,
+        reference_date: Optional[Union[date, datetime]] = None,
+    ) -> WeatherSummaryResponse:
+        """Compute deterministic statistics and generate an AI natural-language narrative.
+
+        Fault-Tolerant Behavior:
+        - Calculates deterministic statistics first.
+        - If statistics return INSUFFICIENT_HISTORICAL_DATA, returns directly without calling LLM.
+        - If statistics succeed, delegates to LLMService.generate_weather_summary.
+        - If LLM generation succeeds, returns status='SUCCESS' with summary text.
+        - If LLM generation fails (e.g. unconfigured API key, timeout, rate limit), returns status='PARTIAL_SUCCESS'
+          with complete deterministic statistics intact and an informative guidance message.
+        """
+        stats_response = self.calculate_average_weather(
+            city=city,
+            period=period,
+            period_value=period_value,
+            duration=duration,
+            reference_date=reference_date,
+        )
+
+        effective_duration = duration if duration is not None else period_value
+        period_str = stats_response.period_type
+
+        # If data is insufficient, do not call LLM
+        if stats_response.status == "INSUFFICIENT_HISTORICAL_DATA":
+            return WeatherSummaryResponse(
+                status="INSUFFICIENT_HISTORICAL_DATA",
+                city=stats_response.city,
+                period_type=period_str,
+                duration=effective_duration,
+                statistics=stats_response,
+                summary=None,
+                message=stats_response.message or "Unable to retrieve historical weather data right now. Please try again.",
+            )
+
+        # Attempt AI narrative generation via Groq LLM
+        summary_text = self.llm_service.generate_weather_summary(
+            city=stats_response.city,
+            period=period_str,
+            duration=effective_duration,
+            statistics=stats_response.model_dump(),
+            raise_on_error=False,
+        )
+
+        if summary_text:
+            stats_response.summary = summary_text
+            return WeatherSummaryResponse(
+                status="SUCCESS",
+                city=stats_response.city,
+                period_type=period_str,
+                duration=effective_duration,
+                statistics=stats_response,
+                summary=summary_text,
+                message=None,
+            )
+        else:
+            return WeatherSummaryResponse(
+                status="PARTIAL_SUCCESS",
+                city=stats_response.city,
+                period_type=period_str,
+                duration=effective_duration,
+                statistics=stats_response,
+                summary=None,
+                message="Weather statistics are available, but the AI summary could not be generated right now.",
+            )
+
 

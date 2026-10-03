@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { getWeatherStatistics } from "../services/api";
+import { getWeatherSummary } from "../services/api";
 
 const WEEK_DURATIONS = [
   { value: 1, label: "1 Week" },
@@ -42,16 +42,25 @@ export function WeatherStatistics({ city }) {
     setError(null);
 
     try {
-      const data = await getWeatherStatistics(city.trim(), period, duration);
+      const data = await getWeatherSummary(city.trim(), period, duration);
       if (data.status === "INSUFFICIENT_HISTORICAL_DATA") {
         setError(data.message || "Unable to retrieve historical weather data right now. Please try again.");
         setStats(null);
       } else {
-        setStats(data);
+        const statsData = {
+          ...(data.statistics || {}),
+          status: data.status,
+          summary: data.summary || data.statistics?.summary,
+          message: data.message || data.statistics?.message,
+          city: data.city || data.statistics?.city || city.trim(),
+          period_type: data.period_type || data.statistics?.period_type || period,
+          duration: data.duration || data.statistics?.duration || duration,
+        };
+        setStats(statsData);
         setLastCalculated({
-          city: data.city || city.trim(),
-          period: data.period_type || period,
-          duration: data.duration || duration,
+          city: statsData.city,
+          period: statsData.period_type,
+          duration: statsData.duration,
         });
       }
     } catch {
@@ -242,6 +251,27 @@ export function WeatherStatistics({ city }) {
                 )
               )}
             </div>
+
+            {/* AI Meteorological Narrative Summary */}
+            {stats.summary ? (
+              <div className="ai-summary-card" id="ai-meteorological-summary">
+                <div className="ai-summary-header">
+                  <div className="ai-summary-title-group">
+                    <span className="ai-summary-icon" aria-hidden="true">✨</span>
+                    <h4 className="ai-summary-title">AI Meteorological Summary</h4>
+                  </div>
+                  <span className="ai-model-badge">Groq · Llama 3.3 70B</span>
+                </div>
+                <p className="ai-summary-text">{stats.summary}</p>
+              </div>
+            ) : stats.status === "PARTIAL_SUCCESS" ? (
+              <div className="ai-summary-fallback-notice" id="ai-summary-fallback-notice">
+                <span className="ai-fallback-icon" aria-hidden="true">ℹ️</span>
+                <span className="ai-fallback-text">
+                  Historical metrics calculated deterministically. AI narrative summary is currently offline (Groq API key not configured or provider unavailable).
+                </span>
+              </div>
+            ) : null}
 
             {/* Case A: Multi-Month or Single Month Selection -> Show Monthly Breakdown + Overall Average */}
             {isMonthView && stats.monthly_averages && stats.monthly_averages.length > 0 ? (

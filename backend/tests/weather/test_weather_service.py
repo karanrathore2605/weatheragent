@@ -226,3 +226,31 @@ def test_get_forecast_flow(mock_client: MagicMock) -> None:
     assert result.city == "Indore"
     assert len(result.forecast) == 1
 
+
+def test_get_current_weather_with_summary_success(mock_client: MagicMock) -> None:
+    """Test that current weather receives AI summary when LLM generation succeeds."""
+    mock_llm = MagicMock()
+    mock_llm.generate_current_weather_summary.return_value = (
+        "Indore is currently experiencing clear weather with a temperature of 28.4°C."
+    )
+    service = WeatherService(client=mock_client, llm_service=mock_llm)
+    res = service.get_current_weather("Indore")
+
+    assert res.summary == "Indore is currently experiencing clear weather with a temperature of 28.4°C."
+    assert res.summary_status == "SUCCESS"
+    assert res.summary_message is None
+
+
+def test_get_current_weather_with_summary_failure_fallback(mock_client: MagicMock) -> None:
+    """Test that current weather falls back gracefully when LLM generation fails."""
+    mock_llm = MagicMock()
+    mock_llm.generate_current_weather_summary.return_value = None
+    service = WeatherService(client=mock_client, llm_service=mock_llm)
+    res = service.get_current_weather("Indore")
+
+    assert res.summary is None
+    assert res.summary_status == "UNAVAILABLE"
+    assert "Weather summary is currently unavailable" in res.summary_message
+    assert res.temperature == 28.4
+
+
