@@ -1,7 +1,11 @@
 """Thin weather tool interfaces prepared for future LangGraph integration."""
 
-from typing import Optional
-from app.schemas.weather_schema import ForecastResponse, WeatherResponse
+from typing import Any, Optional
+from app.schemas.weather_schema import (
+    ForecastResponse,
+    WeatherResponse,
+    WeatherStatisticsResponse,
+)
 from app.services.weather_service import WeatherService
 from app.utils.logger import get_logger
 
@@ -51,3 +55,36 @@ def get_weather_forecast(
     logger.info("Tool invoked: get_weather_forecast for city '%s' (days=%s)", city, days)
     active_service = service or WeatherService()
     return active_service.get_forecast(city=city, days=days)
+
+
+def get_historical_average_weather(
+    city: str,
+    period: str = "week",
+    duration: int = 1,
+    service: Optional[Any] = None,
+) -> WeatherStatisticsResponse:
+    """Fetch historical average temperature statistics for a city over a duration.
+    
+    Architecture Rule:
+    - Agent -> Tool -> Service -> Client.
+    - Thin tool layer for LangGraph state graph tool-binding.
+    - Does not contain business logic; delegates directly to StatisticsService.
+    
+    Args:
+        city: Name of the city to look up.
+        period: Aggregation period ('week' or 'month').
+        duration: Duration count (e.g. 2 for 2 weeks, 3 for 3 months).
+        service: Optional injected StatisticsService instance.
+        
+    Returns:
+        Canonical WeatherStatisticsResponse model containing calculated averages.
+    """
+    from app.services.statistics_service import StatisticsService
+    logger.info("Tool invoked: get_historical_average_weather for '%s' (period=%s, duration=%d)", city, period, duration)
+    active_service = service or StatisticsService()
+    return active_service.calculate_average_weather(
+        city=city,
+        period=period,
+        duration=duration,
+    )
+

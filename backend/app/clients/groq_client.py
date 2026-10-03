@@ -178,6 +178,6 @@ class GroqClient(BaseLLMClient):
             logger.warning("Groq returned empty content string")
             raise LLMEmptyResponseError("Groq returned an empty text content.")
 
-        cleaned_text = content.strip()
+        cleaned_text = content.strip().replace("\u202f", " ").replace("\xa0", " ")
         logger.info("Successfully received LLM completion (%d characters)", len(cleaned_text))
         return cleaned_text
